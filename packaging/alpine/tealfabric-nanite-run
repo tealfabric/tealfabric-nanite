@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+if [ -f /etc/tealfabric-nanite/config.env ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . /etc/tealfabric-nanite/config.env
+  set +a
+fi
+export TF_NANITE_STATE_DIR="${TF_NANITE_STATE_DIR:-/var/lib/tealfabric-nanite}"
+exec /usr/local/bin/node /usr/lib/tealfabric-nanite/dist/main.js

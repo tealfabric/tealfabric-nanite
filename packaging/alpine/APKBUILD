@@ -1,0 +1,45 @@
+# Alpine appliance package. Node.js is the official musl build under /usr/local.
+# This package does not depend on Alpine's nodejs package.
+# Before abuild: npm ci && npm run build, and keep production node_modules/.
+pkgname=tealfabric-nanite
+pkgver=0.1.0
+pkgrel=0
+pkgdesc="Outbound Tealfabric session for private HTTP endpoints"
+url="https://github.com/tealfabric/tealfabric-nanite"
+arch="x86_64 aarch64"
+license="custom"
+depends="ca-certificates openrc"
+makedepends=""
+options="!check"
+_nodever=26.13.0
+
+case "$CARCH" in
+  x86_64) _nodearch=x64 ;;
+  aarch64) _nodearch=arm64 ;;
+esac
+
+source="
+  https://nodejs.org/dist/v${_nodever}/node-v${_nodever}-linux-${_nodearch}-musl.tar.xz
+  tealfabric-nanite.initd
+  tealfabric-nanite-run
+  config.env.example
+  "
+
+build() {
+  :
+}
+
+package() {
+  mkdir -p "$pkgdir/usr/local" "$pkgdir/usr/lib/tealfabric-nanite" "$pkgdir/etc/tealfabric-nanite"
+  tar -C "$pkgdir/usr/local" --strip-components=1 -xf "$srcdir/node-v${_nodever}-linux-${_nodearch}-musl.tar.xz"
+  cp -a "$startdir/../../dist" "$pkgdir/usr/lib/tealfabric-nanite/dist"
+  cp -a "$startdir/../../node_modules" "$pkgdir/usr/lib/tealfabric-nanite/node_modules"
+  cp -a "$startdir/../../package.json" "$pkgdir/usr/lib/tealfabric-nanite/package.json"
+  install -m 0755 "$srcdir/tealfabric-nanite-run" "$pkgdir/usr/lib/tealfabric-nanite/tealfabric-nanite-run"
+  install -m 0755 "$startdir/../../scripts/upgrade.sh" "$pkgdir/usr/lib/tealfabric-nanite/upgrade.sh"
+  install -m 0755 "$srcdir/tealfabric-nanite.initd" "$pkgdir/etc/init.d/tealfabric-nanite"
+  if [ ! -f "$pkgdir/etc/tealfabric-nanite/upgrade.schedule" ]; then
+    printf '%s\n' "0 3 * * 0" > "$pkgdir/etc/tealfabric-nanite/upgrade.schedule"
+  fi
+  install -m 0644 "$srcdir/config.env.example" "$pkgdir/etc/tealfabric-nanite/config.env.example"
+}

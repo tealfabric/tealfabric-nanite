@@ -1,0 +1,26 @@
+#!/sbin/openrc-run
+
+name="tealfabric-nanite"
+description="Tealfabric Nanite outbound session"
+supervisor=supervise-daemon
+command="/usr/lib/tealfabric-nanite/tealfabric-nanite-run"
+command_user="tealfabric-nanite:tealfabric-nanite"
+pidfile="/run/${RC_SVCNAME}.pid"
+respawn_delay=5
+respawn_max=0
+
+depend() {
+  need net
+}
+
+start_pre() {
+  checkpath -d -m 0700 -o tealfabric-nanite:tealfabric-nanite /var/lib/tealfabric-nanite
+  checkpath -d -m 0755 -o root:root /etc/tealfabric-nanite
+  if [ ! -s /etc/tealfabric-nanite/upgrade.schedule ]; then
+    printf '%s\n' "0 3 * * 0" > /etc/tealfabric-nanite/upgrade.schedule
+  fi
+  mkdir -p /etc/crontabs
+  if ! grep -q '/usr/lib/tealfabric-nanite/upgrade.sh --tick' /etc/crontabs/root 2>/dev/null; then
+    printf '%s\n' "* * * * * /usr/lib/tealfabric-nanite/upgrade.sh --tick" >> /etc/crontabs/root
+  fi
+}

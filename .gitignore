@@ -1,0 +1,5 @@
+node_modules/
+dist/
+*.log
+spki.sha256
+.spki.sha256
