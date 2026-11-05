@@ -44,6 +44,19 @@
 
 Redirects: a 302 is a successful forward of the response. The Nanite does not follow `Location`. If the client expected a followed redirect, change the integration URL to the final host and allowlist that host.
 
+## `podman (no such package)` on Alpine
+
+Podman is in Alpine **community**, not **main**. A default VM often has only `main` enabled, so `apk add podman` fails.
+
+```sh
+grep community /etc/apk/repositories
+# Enable or add community, then:
+apk update
+apk add podman
+```
+
+Current `install.sh` enables community automatically before installing Podman. Re-run a current installer, or enable community manually as in [Install](02_install.md) Path A step 2.
+
 ## `NANITE_IMAGE_REF is unset` from `curl … \| sh -`
 
 The CDN is serving an old `install.sh` that required `--image` and did not read `NANITE_IMAGE_REF`. Confirm:

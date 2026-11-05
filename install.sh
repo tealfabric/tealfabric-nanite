@@ -74,13 +74,56 @@ if [ -z "${TF_NANITE_PLATFORM_URL:-}" ]; then
   exit 1
 fi
 
+# Podman (and Docker) live in Alpine *community*, not main. Many VMs only enable main.
+ensure_alpine_community_repo() {
+  repos=/etc/apk/repositories
+  if [ ! -f "$repos" ]; then
+    echo "Alpine apk repositories file missing: $repos" >&2
+    exit 1
+  fi
+
+  # Uncomment any community lines that are present but disabled.
+  if grep -qE '^[[:space:]]*#.*/community' "$repos"; then
+    # portable in-place edit without requiring GNU sed
+    tmp=$(mktemp)
+    sed -E 's|^[[:space:]]*#[[:space:]]*([^#].*/community.*)|\1|' "$repos" > "$tmp"
+    cat "$tmp" > "$repos"
+    rm -f "$tmp"
+  fi
+
+  # If still no enabled community line, derive one from an enabled main mirror.
+  if ! grep -qE '^[[:space:]]*[^#[:space:]].*/community' "$repos"; then
+    main_line=$(grep -E '^[[:space:]]*[^#[:space:]].*/main(/|$|[[:space:]])' "$repos" | head -n 1 || true)
+    if [ -z "$main_line" ]; then
+      echo "Enable the Alpine community repository (podman is not in main), then re-run." >&2
+      echo "Example: echo \"https://dl-cdn.alpinelinux.org/alpine/v\$(cut -d. -f1,2 /etc/alpine-release)/community\" >> /etc/apk/repositories" >&2
+      exit 1
+    fi
+    community_line=$(printf '%s\n' "$main_line" | sed 's|/main|/community|')
+    printf '%s\n' "$community_line" >> "$repos"
+    echo "Enabled Alpine community repository: $community_line"
+  fi
+
+  apk update
+}
+
+install_alpine_podman() {
+  ensure_alpine_community_repo
+  apk add --no-cache podman
+  # Rootful podman needs cgroups on Alpine.
+  if command -v rc-update >/dev/null 2>&1; then
+    rc-update add cgroups default 2>/dev/null || rc-update add cgroups boot 2>/dev/null || true
+    rc-service cgroups start 2>/dev/null || true
+  fi
+}
+
 runtime=""
 if command -v podman >/dev/null 2>&1; then
   runtime=podman
 elif command -v docker >/dev/null 2>&1; then
   runtime=docker
 elif [ -f /etc/alpine-release ]; then
-  apk add --no-cache podman
+  install_alpine_podman
   runtime=podman
 else
   cat >&2 <<'EOF'

@@ -73,6 +73,16 @@ setup-interfaces
 setup-dns
 rc-service networking start
 rc-update add networking boot
+```
+
+Enable the Alpine **community** repository. Podman (used by `install.sh`) is not in `main`:
+
+```sh
+# Uncomment community if setup-apkrepos left it commented, or add it from main:
+sed -i -E 's|^[#[:space:]]*(.*/community.*)|\1|' /etc/apk/repositories
+grep -qE '^[[:space:]]*[^#[:space:]].*/community' /etc/apk/repositories || \
+  sed -n -E 's|^([[:space:]]*[^#[:space:]].*)/main(.*)|\1/community\2|p' /etc/apk/repositories \
+  | head -n 1 >> /etc/apk/repositories
 apk update
 apk add curl ca-certificates
 ```
@@ -82,6 +92,8 @@ Confirm the host can reach the CDN and Tealfabric:
 ```sh
 curl -fsSI https://cdn.tealfabric.io/nanite/install.sh >/dev/null && echo ok
 ```
+
+If you skip enabling community here, `install.sh` still tries to enable it before `apk add podman`.
 
 ### 3. Install and enroll (one shot)
 
@@ -105,7 +117,7 @@ curl -fsSL https://cdn.tealfabric.io/nanite/install.sh | sh -
 
 What the script does, in order:
 
-1. Selects Podman or Docker, or installs Podman with `apk` on Alpine.
+1. Selects Podman or Docker, or on Alpine enables the **community** repo (Podman is not in `main`) and installs Podman with `apk`.
 2. Resolves the image, in order: `--image`, `TF_NANITE_IMAGE`, `NANITE_IMAGE_REF`, else `https://cdn.tealfabric.io/nanite/<channel>/tealfabric-nanite-linux-<arch>.tar` (`channel` default `nightly-build`).
 3. For an `https://` image URL: downloads the archive, verifies `SHA256SUMS` when present, reads `image_tag` from sibling `release.json`, and loads the image. For a non-URL reference: `pull`.
 4. Creates `/var/lib/tealfabric-nanite` mode `0700`.
