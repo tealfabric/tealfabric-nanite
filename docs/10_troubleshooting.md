@@ -44,18 +44,23 @@
 
 Redirects: a 302 is a successful forward of the response. The Nanite does not follow `Location`. If the client expected a followed redirect, change the integration URL to the final host and allowlist that host.
 
-## `podman (no such package)` on Alpine
+## Alpine apk: `podman (no such package)` or missing `so:libglib` / `gpg`
 
-Podman is in Alpine **community**, not **main**. A default VM often has only `main` enabled, so `apk add podman` fails.
+Podman is in Alpine **community**, not **main**. After an ISO install, `/etc/apk/repositories` often lists only `/media/cdrom/apks`. Adding **community** from the internet while **main** stays on the CD breaks dependency resolution (`so:libglib-2.0.so.0`, `gpg`, …).
+
+Fix: use matching online mirrors for both (same `vX.Y` as `/etc/alpine-release`):
 
 ```sh
-grep community /etc/apk/repositories
-# Enable or add community, then:
+ver=$(cut -d. -f1,2 /etc/alpine-release)
+cat >/etc/apk/repositories <<EOF
+https://dl-cdn.alpinelinux.org/alpine/v${ver}/main
+https://dl-cdn.alpinelinux.org/alpine/v${ver}/community
+EOF
 apk update
 apk add podman
 ```
 
-Current `install.sh` enables community automatically before installing Podman. Re-run a current installer, or enable community manually as in [Install](02_install.md) Path A step 2.
+Current `install.sh` does this before installing Podman. See [Install](02_install.md) Path A step 2.
 
 ## `NANITE_IMAGE_REF is unset` from `curl … \| sh -`
 

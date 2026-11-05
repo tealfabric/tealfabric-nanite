@@ -75,14 +75,15 @@ rc-service networking start
 rc-update add networking boot
 ```
 
-Enable the Alpine **community** repository. Podman (used by `install.sh`) is not in `main`:
+Point apk at **online** `main` and `community` for your Alpine version. A CD/ISO install often leaves only `/media/cdrom/apks`; enabling community alone then fails (missing `libglib`, `gpg`, …) because those deps come from network `main`. Podman itself is in **community**.
 
 ```sh
-# Uncomment community if setup-apkrepos left it commented, or add it from main:
-sed -i -E 's|^[#[:space:]]*(.*/community.*)|\1|' /etc/apk/repositories
-grep -qE '^[[:space:]]*[^#[:space:]].*/community' /etc/apk/repositories || \
-  sed -n -E 's|^([[:space:]]*[^#[:space:]].*)/main(.*)|\1/community\2|p' /etc/apk/repositories \
-  | head -n 1 >> /etc/apk/repositories
+ver=$(cut -d. -f1,2 /etc/alpine-release)
+# Prefer network mirrors; leave cdrom commented out after first boot.
+cat >/etc/apk/repositories <<EOF
+https://dl-cdn.alpinelinux.org/alpine/v${ver}/main
+https://dl-cdn.alpinelinux.org/alpine/v${ver}/community
+EOF
 apk update
 apk add curl ca-certificates
 ```
@@ -93,7 +94,7 @@ Confirm the host can reach the CDN and Tealfabric:
 curl -fsSI https://cdn.tealfabric.io/nanite/install.sh >/dev/null && echo ok
 ```
 
-If you skip enabling community here, `install.sh` still tries to enable it before `apk add podman`.
+If you skip this, `install.sh` still enables matching online `main` + `community` before `apk add podman`.
 
 ### 3. Install and enroll (one shot)
 

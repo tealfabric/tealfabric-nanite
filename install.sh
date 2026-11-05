@@ -74,41 +74,84 @@ if [ -z "${TF_NANITE_PLATFORM_URL:-}" ]; then
   exit 1
 fi
 
-# Podman (and Docker) live in Alpine *community*, not main. Many VMs only enable main.
-ensure_alpine_community_repo() {
+# Podman (and Docker) live in Alpine *community*, not main.
+# Fresh ISO installs often keep only /media/cdrom/apks for main. Adding community
+# alone then fails with missing so:libglib… because deps must come from matching
+# online *main* + *community* for the same vX.Y.
+ensure_alpine_apk_repos() {
   repos=/etc/apk/repositories
   if [ ! -f "$repos" ]; then
     echo "Alpine apk repositories file missing: $repos" >&2
     exit 1
   fi
-
-  # Uncomment any community lines that are present but disabled.
-  if grep -qE '^[[:space:]]*#.*/community' "$repos"; then
-    # portable in-place edit without requiring GNU sed
-    tmp=$(mktemp)
-    sed -E 's|^[[:space:]]*#[[:space:]]*([^#].*/community.*)|\1|' "$repos" > "$tmp"
-    cat "$tmp" > "$repos"
-    rm -f "$tmp"
+  if [ ! -f /etc/alpine-release ]; then
+    echo "Alpine release file missing: /etc/alpine-release" >&2
+    exit 1
   fi
 
-  # If still no enabled community line, derive one from an enabled main mirror.
-  if ! grep -qE '^[[:space:]]*[^#[:space:]].*/community' "$repos"; then
-    main_line=$(grep -E '^[[:space:]]*[^#[:space:]].*/main(/|$|[[:space:]])' "$repos" | head -n 1 || true)
-    if [ -z "$main_line" ]; then
-      echo "Enable the Alpine community repository (podman is not in main), then re-run." >&2
-      echo "Example: echo \"https://dl-cdn.alpinelinux.org/alpine/v\$(cut -d. -f1,2 /etc/alpine-release)/community\" >> /etc/apk/repositories" >&2
-      exit 1
-    fi
-    community_line=$(printf '%s\n' "$main_line" | sed 's|/main|/community|')
-    printf '%s\n' "$community_line" >> "$repos"
-    echo "Enabled Alpine community repository: $community_line"
+  version=$(cut -d. -f1,2 /etc/alpine-release)
+  mirror_base=${TF_NANITE_ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org/alpine}
+  main_url="${mirror_base}/v${version}/main"
+  community_url="${mirror_base}/v${version}/community"
+
+  tmp=$(mktemp)
+  has_net_main=0
+  has_net_community=0
+
+  # Rewrite repos: comment install media; uncomment network main/community lines.
+  while IFS= read -r line || [ -n "$line" ]; do
+    trimmed=$(printf '%s' "$line" | sed 's/^[[:space:]]*//')
+    case "$trimmed" in
+      \#*)
+        rest=$(printf '%s' "$trimmed" | sed 's/^#[[:space:]]*//')
+        case "$rest" in
+          http://*/main|http://*/main/*|https://*/main|https://*/main/*|ftp://*/main|ftp://*/main/*)
+            printf '%s\n' "$rest" >> "$tmp"
+            has_net_main=1
+            ;;
+          http://*/community|http://*/community/*|https://*/community|https://*/community/*|ftp://*/community|ftp://*/community/*)
+            printf '%s\n' "$rest" >> "$tmp"
+            has_net_community=1
+            ;;
+          *)
+            printf '%s\n' "$line" >> "$tmp"
+            ;;
+        esac
+        ;;
+      */media/*|*cdrom*)
+        printf '%s\n' "#${trimmed}" >> "$tmp"
+        ;;
+      http://*/main|http://*/main/*|https://*/main|https://*/main/*|ftp://*/main|ftp://*/main/*)
+        printf '%s\n' "$trimmed" >> "$tmp"
+        has_net_main=1
+        ;;
+      http://*/community|http://*/community/*|https://*/community|https://*/community/*|ftp://*/community|ftp://*/community/*)
+        printf '%s\n' "$trimmed" >> "$tmp"
+        has_net_community=1
+        ;;
+      *)
+        printf '%s\n' "$line" >> "$tmp"
+        ;;
+    esac
+  done < "$repos"
+
+  if [ "$has_net_main" -eq 0 ]; then
+    printf '%s\n' "$main_url" >> "$tmp"
+    echo "Enabled Alpine main repository: $main_url"
   fi
+  if [ "$has_net_community" -eq 0 ]; then
+    printf '%s\n' "$community_url" >> "$tmp"
+    echo "Enabled Alpine community repository: $community_url"
+  fi
+
+  cat "$tmp" > "$repos"
+  rm -f "$tmp"
 
   apk update
 }
 
 install_alpine_podman() {
-  ensure_alpine_community_repo
+  ensure_alpine_apk_repos
   apk add --no-cache podman
   # Rootful podman needs cgroups on Alpine.
   if command -v rc-update >/dev/null 2>&1; then
