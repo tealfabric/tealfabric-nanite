@@ -120,7 +120,7 @@ What the script does, in order:
 
 1. Selects Podman or Docker, or on Alpine enables online **main** + **community**, installs Podman with `apk`, and starts `cgroups`. Run as root so Podman is rootful; Alpine’s rootless `subuid`/`subgid` warning then does not apply.
 2. Resolves the image, in order: `--image`, `TF_NANITE_IMAGE`, `NANITE_IMAGE_REF`, else `TF_NANITE_CHANNEL` / `--channel`, else `latest/release.json` → that release's archive for this arch.
-3. For an `https://` image URL: downloads the archive, verifies `SHA256SUMS` when present, reads `image_tag` from sibling `release.json`, and loads the image. For a non-URL reference: `pull`.
+3. For an `https://` image URL: downloads the `.tar.gz` archive, verifies `SHA256SUMS` when present, gunzips it, reads `image_tag` from sibling `release.json`, and `podman`/`docker load`s the image. For a non-URL reference: `pull`.
 4. Creates `/var/lib/tealfabric-nanite` mode `0700`.
 5. Starts the container with `--restart=always`, mounts the state directory, and passes the platform URL and enrollment token for the first run.
 6. Waits for `nanite_id` in the state directory and prints it.
@@ -135,7 +135,7 @@ Set these before the `curl | sh -` line when needed:
 
 ```sh
 export TF_NANITE_PLATFORM_URL='wss://tealfabric.io/api/v1/nanites/session'   # default already
-export NANITE_IMAGE_REF='https://cdn.tealfabric.io/nanite/0.1.0/tealfabric-nanite-linux-amd64.tar'
+export NANITE_IMAGE_REF='https://cdn.tealfabric.io/nanite/0.1.0/tealfabric-nanite-linux-amd64.tar.gz'
 export TF_NANITE_CHANNEL=0.1.0
 export TF_NANITE_STATE_DIR=/var/lib/tealfabric-nanite
 export TF_NANITE_CONTAINER_NAME=tealfabric-nanite
@@ -146,7 +146,7 @@ Or pass flags after `sh -s --`:
 ```sh
 export TF_NANITE_ENROLLMENT_TOKEN='paste-once'
 curl -fsSL https://cdn.tealfabric.io/nanite/install.sh | sh -s -- \
-  --image https://cdn.tealfabric.io/nanite/0.1.0/tealfabric-nanite-linux-amd64.tar
+  --image https://cdn.tealfabric.io/nanite/0.1.0/tealfabric-nanite-linux-amd64.tar.gz
 ```
 
 | Flag / env | Purpose |

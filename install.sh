@@ -1,9 +1,13 @@
 #!/bin/sh
-# Install Tealfabric Nanite from a CDN image archive (preferred) or an OCI pull ref.
+# Install Tealfabric Nanite from a CDN gzip image archive (.tar.gz) or an OCI pull ref.
 #
 # On a Nanite VM (no local checkout required):
 #   export TF_NANITE_ENROLLMENT_TOKEN='paste-once'
 #   curl -fsSL https://cdn.tealfabric.io/nanite/install.sh | sh -
+#
+# CDN archives are gzip-compressed docker/podman save streams:
+#   https://cdn.tealfabric.io/nanite/<channel>/tealfabric-nanite-linux-<arch>.tar.gz
+# install.sh downloads, verifies SHA256SUMS, gunzips, then podman/docker load.
 #
 # Optional overrides:
 #   TF_NANITE_PLATFORM_URL  (default wss://tealfabric.io/api/v1/nanites/session)
@@ -84,13 +88,13 @@ download() {
 resolve_default_image() {
   arch=$(default_archive_arch)
   if [ -n "$CHANNEL" ]; then
-    IMAGE="${CDN_BASE}/${CHANNEL}/tealfabric-nanite-linux-${arch}.tar"
+    IMAGE="${CDN_BASE}/${CHANNEL}/tealfabric-nanite-linux-${arch}.tar.gz"
     return
   fi
 
   latest_meta="${CDN_BASE}/latest/release.json"
-  latest_archive="${CDN_BASE}/latest/tealfabric-nanite-linux-${arch}.tar"
-  nightly_archive="${CDN_BASE}/nightly-build/tealfabric-nanite-linux-${arch}.tar"
+  latest_archive="${CDN_BASE}/latest/tealfabric-nanite-linux-${arch}.tar.gz"
+  nightly_archive="${CDN_BASE}/nightly-build/tealfabric-nanite-linux-${arch}.tar.gz"
 
   if [ "${TF_NANITE_INSTALL_DRY_RUN:-}" = "1" ]; then
     IMAGE=$latest_archive
@@ -103,12 +107,12 @@ resolve_default_image() {
     archive_url=$(sed -n 's/.*"archive_url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$meta_tmp" | head -n 1)
     rm -f "$meta_tmp"
     if [ -n "$release_key" ]; then
-      IMAGE="${CDN_BASE}/${release_key}/tealfabric-nanite-linux-${arch}.tar"
+      IMAGE="${CDN_BASE}/${release_key}/tealfabric-nanite-linux-${arch}.tar.gz"
       echo "Using latest release ${release_key}"
       return
     fi
     if [ -n "$archive_url" ]; then
-      IMAGE=$(printf '%s\n' "$archive_url" | sed "s|tealfabric-nanite-linux-[A-Za-z0-9_]*\.tar|tealfabric-nanite-linux-${arch}.tar|")
+      IMAGE=$(printf '%s\n' "$archive_url" | sed "s|tealfabric-nanite-linux-[A-Za-z0-9_]*\.tar\(\.gz\)\{0,1\}|tealfabric-nanite-linux-${arch}.tar.gz|")
       echo "Using latest archive ${IMAGE}"
       return
     fi
@@ -292,22 +296,32 @@ load_archive() {
   archive_url=$1
   tmp=$(mktemp -d)
   trap 'rm -rf "$tmp"' EXIT
-  archive_file="$tmp/nanite.tar"
+
+  case "$archive_url" in
+    *.tar.gz|*.tgz) archive_file="$tmp/nanite.tar.gz" ;;
+    *.tar) archive_file="$tmp/nanite.tar" ;;
+    *)
+      echo "CDN image URL must end in .tar.gz (or legacy .tar): ${archive_url}" >&2
+      exit 1
+      ;;
+  esac
+
   echo "Downloading ${archive_url}"
   download "$archive_url" "$archive_file"
 
   sums_url=$(printf '%s' "$archive_url" | sed 's|/[^/]*$|/SHA256SUMS|')
   if download "$sums_url" "$tmp/SHA256SUMS" 2>/dev/null; then
-    (
-      cd "$tmp"
-      # SHA256SUMS names the published archive; rename to match before checking.
-      published=$(awk '/tealfabric-nanite-linux-.*\.tar/{print $2; exit}' SHA256SUMS)
-      if [ -n "$published" ]; then
-        mv "$archive_file" "$tmp/$published"
-        archive_file="$tmp/$published"
-        sha256sum -c SHA256SUMS
-      fi
-    )
+    # SHA256SUMS names the published archive; rename to match before checking.
+    # Prefer .tar.gz; accept legacy plain .tar. Do not use a subshell for the rename.
+    published=$(awk '/tealfabric-nanite-linux-.*\.tar\.gz/{print $2; exit}' "$tmp/SHA256SUMS")
+    if [ -z "$published" ]; then
+      published=$(awk '/tealfabric-nanite-linux-.*\.tar$/{print $2; exit}' "$tmp/SHA256SUMS")
+    fi
+    if [ -n "$published" ]; then
+      mv "$archive_file" "$tmp/$published"
+      archive_file="$tmp/$published"
+      (cd "$tmp" && sha256sum -c SHA256SUMS)
+    fi
   else
     echo "SHA256SUMS not found next to the archive; continuing without checksum verify" >&2
   fi
@@ -322,13 +336,30 @@ load_archive() {
     RUN_TAG=tealfabric-nanite:latest
   fi
 
+  load_file=$archive_file
+  case "$archive_file" in
+    *.tar.gz|*.tgz)
+      if ! command -v gzip >/dev/null 2>&1; then
+        echo "gzip is required to decompress ${archive_file}" >&2
+        exit 1
+      fi
+      load_file="$tmp/nanite.tar"
+      echo "Decompressing gzip archive"
+      gzip -dc "$archive_file" > "$load_file"
+      ;;
+  esac
+
   echo "Loading image archive into ${runtime}"
-  "$runtime" load -i "$archive_file"
+  "$runtime" load -i "$load_file"
+  # Drop the download temp dir only after a successful load (EXIT trap would fire on
+  # function return in ash and delete the archive mid-load if set earlier).
+  trap - EXIT
+  rm -rf "$tmp"
 }
 
 if [ "${TF_NANITE_INSTALL_DRY_RUN:-}" = "1" ]; then
   if [ "$is_http" -eq 1 ]; then
-    printf '%s\n' "download $IMAGE && $runtime load && $runtime $args \${image_tag}"
+    printf '%s\n' "download $IMAGE && gunzip && $runtime load && $runtime $args \${image_tag}"
   else
     printf '%s\n' "$runtime pull $IMAGE"
     printf '%s\n' "$runtime $args $IMAGE"

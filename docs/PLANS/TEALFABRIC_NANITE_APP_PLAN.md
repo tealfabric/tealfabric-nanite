@@ -60,7 +60,7 @@ The image contains the app, the entrypoint, and the public CA bundle. The entryp
 `install.sh` is the supported installer.
 
 1. If `docker` or `podman` is missing and the host is Alpine, install Podman with `apk`. On any other distribution, print that distribution's Docker or Podman install command and stop.
-2. Pull the image tag the admin pasted from Tealfabric. The snippet names the registry and the tag. This repository publishes the image as `tealfabric-nanite`.
+2. Resolve the image: CDN `.tar.gz` archive (default `latest/release.json` → `tealfabric-nanite-linux-<arch>.tar.gz`) or an OCI pull reference from the Tealfabric snippet. CDN publishes are gzip-compressed `podman`/`docker save` streams; the installer gunzips before `load`.
 3. Create the state directory mode `0700`. Do not write an allowlist file.
 4. When the admin passed `--ca-file`, mount that PEM read-only. The entrypoint appends it and sets `NODE_EXTRA_CA_CERTS`. The public roots stay in place.
 5. Start the container with the enrollment token in the environment for the first run. Restart policy is always. After enroll, the token is not required again.

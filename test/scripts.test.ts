@@ -118,7 +118,7 @@ test("install dry run accepts a CDN archive URL without downloading", () => {
   writeFileSync(join(bin, "podman"), "#!/bin/sh\necho podman-called >> \"$NANITE_PODMAN_LOG\"\n");
   chmodSync(join(bin, "podman"), 0o755);
   const log = join(dir, "podman.log");
-  const url = "https://cdn.tealfabric.io/nanite/0.1.0/tealfabric-nanite-linux-amd64.tar";
+  const url = "https://cdn.tealfabric.io/nanite/0.1.0/tealfabric-nanite-linux-amd64.tar.gz";
   const result = spawnSync("sh", [join(root, "install.sh"), "--image", url, "--state-dir", join(dir, "state")], {
     env: {
       ...process.env,
@@ -129,7 +129,8 @@ test("install dry run accepts a CDN archive URL without downloading", () => {
     }
   });
   assert.equal(result.status, 0, result.stderr.toString());
-  assert.match(result.stdout.toString(), /download https:\/\/cdn\.tealfabric\.io/);
+  assert.match(result.stdout.toString(), /download https:\/\/cdn\.tealfabric\.io.*\.tar\.gz/);
+  assert.match(result.stdout.toString(), /gunzip/);
   assert.match(result.stdout.toString(), /load/);
   assert.equal(existsSync(log), false);
 });
@@ -155,7 +156,7 @@ test("install dry run defaults to CDN latest archive and platform URL", () => {
   assert.equal(result.status, 0, result.stderr.toString());
   assert.match(
     result.stdout.toString(),
-    /download https:\/\/cdn\.tealfabric\.io\/nanite\/latest\/tealfabric-nanite-linux-(amd64|arm64)\.tar/
+    /download https:\/\/cdn\.tealfabric\.io\/nanite\/latest\/tealfabric-nanite-linux-(amd64|arm64)\.tar\.gz/
   );
   assert.match(result.stdout.toString(), /TF_NANITE_PLATFORM_URL/);
   assert.equal(existsSync(log), false);
@@ -182,7 +183,7 @@ test("install dry run accepts an explicit CDN channel", () => {
   assert.equal(result.status, 0, result.stderr.toString());
   assert.match(
     result.stdout.toString(),
-    /download https:\/\/cdn\.tealfabric\.io\/nanite\/0\.1\.0\/tealfabric-nanite-linux-(amd64|arm64)\.tar/
+    /download https:\/\/cdn\.tealfabric\.io\/nanite\/0\.1\.0\/tealfabric-nanite-linux-(amd64|arm64)\.tar\.gz/
   );
 });
 
