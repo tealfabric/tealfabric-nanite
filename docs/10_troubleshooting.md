@@ -44,6 +44,27 @@
 
 Redirects: a 302 is a successful forward of the response. The Nanite does not follow `Location`. If the client expected a followed redirect, change the integration URL to the final host and allowlist that host.
 
+## `NANITE_IMAGE_REF is unset` from `curl … \| sh -`
+
+The CDN is serving an old `install.sh` that required `--image` and did not read `NANITE_IMAGE_REF`. Confirm:
+
+```sh
+curl -fsSL https://cdn.tealfabric.io/nanite/install.sh | head -n 20
+```
+
+A current script mentions `NANITE_IMAGE_REF` in the header and defaults the image when unset. Until CDN is republished (`tealfabric-nanite-ci` → `deploy-nanite.yml`), either:
+
+```sh
+export TF_NANITE_ENROLLMENT_TOKEN='paste-once'
+export NANITE_IMAGE_REF='…from Tealfabric snippet…'
+# Temporary: pass --image explicitly for the old CDN script
+curl -fsSL https://cdn.tealfabric.io/nanite/install.sh | sh -s -- --image "$NANITE_IMAGE_REF"
+```
+
+or copy this repository's `install.sh` onto the host and run `sh ./install.sh`.
+
+Also set `TF_NANITE_PLATFORM_URL` when the snippet does not (default on the new script is `wss://tealfabric.io/api/v1/nanites/session`).
+
 ## Container will not start
 
 ```sh

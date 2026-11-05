@@ -7,17 +7,21 @@
 #
 # Optional overrides:
 #   TF_NANITE_PLATFORM_URL  (default wss://tealfabric.io/api/v1/nanites/session)
-#   TF_NANITE_IMAGE / --image  (default CDN latest archive for this arch)
+#   NANITE_IMAGE_REF / TF_NANITE_IMAGE / --image
+#     (default CDN nightly-build archive for this arch)
+#   TF_NANITE_CHANNEL / --channel  (default nightly-build)
 #   curl … | sh -s -- --image REGISTRY/tealfabric-nanite:TAG
 #   [--ca-file PEM] [--state-dir DIR] [--name NAME]
 set -eu
 
 CDN_BASE=${TF_NANITE_CDN_BASE:-https://cdn.tealfabric.io/nanite}
-IMAGE=${TF_NANITE_IMAGE:-}
+# Prefer --image; else TF_NANITE_IMAGE; else platform snippet NANITE_IMAGE_REF.
+IMAGE=${TF_NANITE_IMAGE:-${NANITE_IMAGE_REF:-}}
 CA_FILE=""
 STATE_DIR=${TF_NANITE_STATE_DIR:-/var/lib/tealfabric-nanite}
 CONTAINER_NAME=${TF_NANITE_CONTAINER_NAME:-tealfabric-nanite}
 RUN_TAG=${TF_NANITE_IMAGE_TAG:-}
+CHANNEL=${TF_NANITE_CHANNEL:-nightly-build}
 TF_NANITE_PLATFORM_URL=${TF_NANITE_PLATFORM_URL:-wss://tealfabric.io/api/v1/nanites/session}
 export TF_NANITE_PLATFORM_URL
 
@@ -39,6 +43,10 @@ while [ $# -gt 0 ]; do
       CONTAINER_NAME=${2:-}
       shift 2
       ;;
+    --channel)
+      CHANNEL=${2:-}
+      shift 2
+      ;;
     *)
       echo "unknown argument: $1" >&2
       exit 1
@@ -51,14 +59,14 @@ default_archive_arch() {
     x86_64|amd64) printf '%s\n' amd64 ;;
     aarch64|arm64) printf '%s\n' arm64 ;;
     *)
-      echo "unsupported architecture: $(uname -m); pass --image" >&2
+      echo "unsupported architecture: $(uname -m); pass --image or set NANITE_IMAGE_REF" >&2
       exit 1
       ;;
   esac
 }
 
 if [ -z "$IMAGE" ]; then
-  IMAGE="${CDN_BASE}/latest/tealfabric-nanite-linux-$(default_archive_arch).tar"
+  IMAGE="${CDN_BASE}/${CHANNEL}/tealfabric-nanite-linux-$(default_archive_arch).tar"
 fi
 
 if [ -z "${TF_NANITE_PLATFORM_URL:-}" ]; then

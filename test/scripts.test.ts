@@ -134,7 +134,7 @@ test("install dry run accepts a CDN archive URL without downloading", () => {
   assert.equal(existsSync(log), false);
 });
 
-test("install dry run defaults to CDN latest archive and platform URL", () => {
+test("install dry run defaults to CDN nightly-build archive and platform URL", () => {
   const dir = mkdtempSync(join(tmpdir(), "nanite-install-default-"));
   const bin = join(dir, "bin");
   mkdirSync(bin);
@@ -149,12 +149,36 @@ test("install dry run defaults to CDN latest archive and platform URL", () => {
   };
   delete env.TF_NANITE_PLATFORM_URL;
   delete env.TF_NANITE_IMAGE;
+  delete env.NANITE_IMAGE_REF;
+  delete env.TF_NANITE_CHANNEL;
   const result = spawnSync("sh", [join(root, "install.sh"), "--state-dir", join(dir, "state")], { env });
   assert.equal(result.status, 0, result.stderr.toString());
   assert.match(
     result.stdout.toString(),
-    /download https:\/\/cdn\.tealfabric\.io\/nanite\/latest\/tealfabric-nanite-linux-(amd64|arm64)\.tar/
+    /download https:\/\/cdn\.tealfabric\.io\/nanite\/nightly-build\/tealfabric-nanite-linux-(amd64|arm64)\.tar/
   );
   assert.match(result.stdout.toString(), /TF_NANITE_PLATFORM_URL/);
+  assert.equal(existsSync(log), false);
+});
+
+test("install dry run accepts NANITE_IMAGE_REF from the Tealfabric snippet", () => {
+  const dir = mkdtempSync(join(tmpdir(), "nanite-install-ref-"));
+  const bin = join(dir, "bin");
+  mkdirSync(bin);
+  writeFileSync(join(bin, "podman"), "#!/bin/sh\necho podman-called >> \"$NANITE_PODMAN_LOG\"\n");
+  chmodSync(join(bin, "podman"), 0o755);
+  const log = join(dir, "podman.log");
+  const result = spawnSync("sh", [join(root, "install.sh"), "--state-dir", join(dir, "state")], {
+    env: {
+      ...process.env,
+      PATH: `${bin}:${process.env.PATH ?? ""}`,
+      TF_NANITE_INSTALL_DRY_RUN: "1",
+      NANITE_PODMAN_LOG: log,
+      TF_NANITE_PLATFORM_URL: "wss://tealfabric.io/api/v1/nanites/session",
+      NANITE_IMAGE_REF: "registry.example/tealfabric-nanite:0.1.0"
+    }
+  });
+  assert.equal(result.status, 0, result.stderr.toString());
+  assert.match(result.stdout.toString(), /podman pull registry\.example\/tealfabric-nanite:0\.1\.0/);
   assert.equal(existsSync(log), false);
 });

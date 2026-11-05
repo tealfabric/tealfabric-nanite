@@ -35,7 +35,7 @@ ProcessFlow, agents, and the Tealfabric console keep calling the integration the
 | Container (`install.sh` + Docker or Podman) | The site already runs containers. Updates are new image tags. |
 | Alpine appliance (OpenRC package) | A dedicated Alpine host should stay small and self-upgrading with `apk`. |
 
-Both shapes need outbound TCP 443 to Tealfabric and a state directory. Neither needs an inbound port from the internet.
+Both shapes need outbound TCP 443 to Tealfabric and a state directory. Neither needs an inbound port from the internet. Recommended dedicated host size is **1 vCPU, 1 GiB RAM, 8 GiB disk** (see [Install](02_install.md)).
 
 ## One process, one tenant
 
