@@ -1,11 +1,19 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
-test("this copy's contract revision text equals the platform plan", () => {
+test("this copy's contract revision text equals the platform plan", (t) => {
+  const platformPath = join(
+    import.meta.dirname,
+    "../../dev.tealfabric.io/docs/PLANS/TEALFABRIC_NANITE_PLATFORM_PLAN.md"
+  );
+  if (!existsSync(platformPath)) {
+    t.skip("platform plan not checked out beside this repo");
+    return;
+  }
   const app = readFileSync(join(import.meta.dirname, "../docs/PLANS/TEALFABRIC_NANITE_APP_PLAN.md"), "utf8");
-  const platform = readFileSync(join(import.meta.dirname, "../../dev.tealfabric.io/docs/PLANS/TEALFABRIC_NANITE_PLATFORM_PLAN.md"), "utf8");
+  const platform = readFileSync(platformPath, "utf8");
   const start = "**Contract revision: 2026-11-04.1**";
   const end = "End of session contract.";
   const appSlice = app.slice(app.indexOf(start), app.indexOf(end) + end.length);

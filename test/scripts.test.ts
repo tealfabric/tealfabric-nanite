@@ -110,3 +110,51 @@ test("install dry run names the image and does not pull it", () => {
   assert.match(result.stdout.toString(), /TF_NANITE_ENROLLMENT_TOKEN/);
   assert.equal(existsSync(log), false);
 });
+
+test("install dry run accepts a CDN archive URL without downloading", () => {
+  const dir = mkdtempSync(join(tmpdir(), "nanite-install-cdn-"));
+  const bin = join(dir, "bin");
+  mkdirSync(bin);
+  writeFileSync(join(bin, "podman"), "#!/bin/sh\necho podman-called >> \"$NANITE_PODMAN_LOG\"\n");
+  chmodSync(join(bin, "podman"), 0o755);
+  const log = join(dir, "podman.log");
+  const url = "https://cdn.tealfabric.io/nanite/0.1.0/tealfabric-nanite-linux-amd64.tar";
+  const result = spawnSync("sh", [join(root, "install.sh"), "--image", url, "--state-dir", join(dir, "state")], {
+    env: {
+      ...process.env,
+      PATH: `${bin}:${process.env.PATH ?? ""}`,
+      TF_NANITE_INSTALL_DRY_RUN: "1",
+      TF_NANITE_PLATFORM_URL: "wss://platform.example/api/v1/nanites/session",
+      NANITE_PODMAN_LOG: log
+    }
+  });
+  assert.equal(result.status, 0, result.stderr.toString());
+  assert.match(result.stdout.toString(), /download https:\/\/cdn\.tealfabric\.io/);
+  assert.match(result.stdout.toString(), /load/);
+  assert.equal(existsSync(log), false);
+});
+
+test("install dry run defaults to CDN latest archive and platform URL", () => {
+  const dir = mkdtempSync(join(tmpdir(), "nanite-install-default-"));
+  const bin = join(dir, "bin");
+  mkdirSync(bin);
+  writeFileSync(join(bin, "podman"), "#!/bin/sh\necho podman-called >> \"$NANITE_PODMAN_LOG\"\n");
+  chmodSync(join(bin, "podman"), 0o755);
+  const log = join(dir, "podman.log");
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    PATH: `${bin}:${process.env.PATH ?? ""}`,
+    TF_NANITE_INSTALL_DRY_RUN: "1",
+    NANITE_PODMAN_LOG: log
+  };
+  delete env.TF_NANITE_PLATFORM_URL;
+  delete env.TF_NANITE_IMAGE;
+  const result = spawnSync("sh", [join(root, "install.sh"), "--state-dir", join(dir, "state")], { env });
+  assert.equal(result.status, 0, result.stderr.toString());
+  assert.match(
+    result.stdout.toString(),
+    /download https:\/\/cdn\.tealfabric\.io\/nanite\/latest\/tealfabric-nanite-linux-(amd64|arm64)\.tar/
+  );
+  assert.match(result.stdout.toString(), /TF_NANITE_PLATFORM_URL/);
+  assert.equal(existsSync(log), false);
+});

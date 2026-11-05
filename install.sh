@@ -1,12 +1,25 @@
 #!/bin/sh
-# Install Tealfabric Nanite from the image named in the Tealfabric snippet.
-# Usage: install.sh --image REGISTRY/tealfabric-nanite:TAG [--ca-file PEM] [--state-dir DIR]
+# Install Tealfabric Nanite from a CDN image archive (preferred) or an OCI pull ref.
+#
+# On a Nanite VM (no local checkout required):
+#   export TF_NANITE_ENROLLMENT_TOKEN='paste-once'
+#   curl -fsSL https://cdn.tealfabric.io/nanite/install.sh | sh -
+#
+# Optional overrides:
+#   TF_NANITE_PLATFORM_URL  (default wss://tealfabric.io/api/v1/nanites/session)
+#   TF_NANITE_IMAGE / --image  (default CDN latest archive for this arch)
+#   curl … | sh -s -- --image REGISTRY/tealfabric-nanite:TAG
+#   [--ca-file PEM] [--state-dir DIR] [--name NAME]
 set -eu
 
-IMAGE=""
+CDN_BASE=${TF_NANITE_CDN_BASE:-https://cdn.tealfabric.io/nanite}
+IMAGE=${TF_NANITE_IMAGE:-}
 CA_FILE=""
 STATE_DIR=${TF_NANITE_STATE_DIR:-/var/lib/tealfabric-nanite}
 CONTAINER_NAME=${TF_NANITE_CONTAINER_NAME:-tealfabric-nanite}
+RUN_TAG=${TF_NANITE_IMAGE_TAG:-}
+TF_NANITE_PLATFORM_URL=${TF_NANITE_PLATFORM_URL:-wss://tealfabric.io/api/v1/nanites/session}
+export TF_NANITE_PLATFORM_URL
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -33,10 +46,21 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+default_archive_arch() {
+  case "$(uname -m)" in
+    x86_64|amd64) printf '%s\n' amd64 ;;
+    aarch64|arm64) printf '%s\n' arm64 ;;
+    *)
+      echo "unsupported architecture: $(uname -m); pass --image" >&2
+      exit 1
+      ;;
+  esac
+}
+
 if [ -z "$IMAGE" ]; then
-  echo "NANITE_IMAGE_REF is unset. Pass --image with the registry reference from Tealfabric." >&2
-  exit 1
+  IMAGE="${CDN_BASE}/latest/tealfabric-nanite-linux-$(default_archive_arch).tar"
 fi
+
 if [ -z "${TF_NANITE_PLATFORM_URL:-}" ]; then
   echo "TF_NANITE_PLATFORM_URL is required" >&2
   exit 1
@@ -63,6 +87,11 @@ fi
 mkdir -p "$STATE_DIR"
 chmod 700 "$STATE_DIR"
 
+is_http=0
+case "$IMAGE" in
+  http://*|https://*) is_http=1 ;;
+esac
+
 args="run -d --name $CONTAINER_NAME --restart=always"
 args="$args -v $STATE_DIR:/var/lib/tealfabric-nanite"
 args="$args -e TF_NANITE_PLATFORM_URL"
@@ -84,15 +113,76 @@ if [ -n "$CA_FILE" ]; then
   args="$args -e TF_NANITE_CA_BUNDLE=/etc/tealfabric-nanite/extra-ca.pem"
 fi
 
+download() {
+  url=$1
+  dest=$2
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$url" -o "$dest"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO "$dest" "$url"
+  else
+    echo "curl or wget is required to download ${url}" >&2
+    exit 1
+  fi
+}
+
+load_archive() {
+  archive_url=$1
+  tmp=$(mktemp -d)
+  trap 'rm -rf "$tmp"' EXIT
+  archive_file="$tmp/nanite.tar"
+  echo "Downloading ${archive_url}"
+  download "$archive_url" "$archive_file"
+
+  sums_url=$(printf '%s' "$archive_url" | sed 's|/[^/]*$|/SHA256SUMS|')
+  if download "$sums_url" "$tmp/SHA256SUMS" 2>/dev/null; then
+    (
+      cd "$tmp"
+      # SHA256SUMS names the published archive; rename to match before checking.
+      published=$(awk '/tealfabric-nanite-linux-.*\.tar/{print $2; exit}' SHA256SUMS)
+      if [ -n "$published" ]; then
+        mv "$archive_file" "$tmp/$published"
+        archive_file="$tmp/$published"
+        sha256sum -c SHA256SUMS
+      fi
+    )
+  else
+    echo "SHA256SUMS not found next to the archive; continuing without checksum verify" >&2
+  fi
+
+  if [ -z "$RUN_TAG" ]; then
+    meta_url=$(printf '%s' "$archive_url" | sed 's|/[^/]*$|/release.json|')
+    if download "$meta_url" "$tmp/release.json" 2>/dev/null; then
+      RUN_TAG=$(sed -n 's/.*"image_tag"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$tmp/release.json" | head -n 1)
+    fi
+  fi
+  if [ -z "$RUN_TAG" ]; then
+    RUN_TAG=tealfabric-nanite:latest
+  fi
+
+  echo "Loading image archive into ${runtime}"
+  "$runtime" load -i "$archive_file"
+}
+
 if [ "${TF_NANITE_INSTALL_DRY_RUN:-}" = "1" ]; then
-  printf '%s\n' "$runtime pull $IMAGE"
-  printf '%s\n' "$runtime $args $IMAGE"
+  if [ "$is_http" -eq 1 ]; then
+    printf '%s\n' "download $IMAGE && $runtime load && $runtime $args \${image_tag}"
+  else
+    printf '%s\n' "$runtime pull $IMAGE"
+    printf '%s\n' "$runtime $args $IMAGE"
+  fi
   exit 0
 fi
 
-"$runtime" pull "$IMAGE"
-# shellcheck disable=SC2086
-"$runtime" $args "$IMAGE"
+if [ "$is_http" -eq 1 ]; then
+  load_archive "$IMAGE"
+  # shellcheck disable=SC2086
+  "$runtime" $args "$RUN_TAG"
+else
+  "$runtime" pull "$IMAGE"
+  # shellcheck disable=SC2086
+  "$runtime" $args "$IMAGE"
+fi
 
 i=0
 while [ "$i" -lt 90 ]; do
