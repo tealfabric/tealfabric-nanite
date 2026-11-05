@@ -17,8 +17,8 @@ Size a dedicated Alpine VM or appliance for Nanite alone. The process holds one 
 | Resource | Recommended | Minimum | Notes |
 |----------|-------------|---------|-------|
 | **vCPU** | 1 | 1 | A second vCPU is optional headroom for OS and container runtime; Nanite itself is not CPU-bound. |
-| **RAM** | 1 GiB | 512 MiB | Use **1 GiB** for Path A (Podman/Docker). **512 MiB** can work for Path B (OpenRC package, no container runtime) on a quiet host. |
-| **Disk** | 8 GiB | 4 GiB | Covers Alpine, the Nanite image or package, `apk` upgrades, and logs. The state directory (`/var/lib/tealfabric-nanite`) stays small (identity, bearer, allowlist cache). |
+| **RAM** | 2 GiB | 1 GiB | Path A needs headroom for a one-shot `podman load` of the image archive. **1 GiB** can work for Path B (OpenRC, no container runtime) on a quiet host. |
+| **Disk** | 8 GiB | 4 GiB | Attach a real virtual disk and install Alpine in **sys** mode onto it. Covers Alpine, Podman image layers, `apk` upgrades, and logs. Do **not** run Nanite from a live ISO / diskless ramdisk — `/tmp` and `/var` would be tmpfs and `podman load` will fail with no space left. |
 
 Network: outbound TCP 443 to Tealfabric; LAN reachability to the private HTTP endpoint. No inbound ports for the Nanite.
 
@@ -30,6 +30,7 @@ Network: outbound TCP 443 to Tealfabric; LAN reachability to the private HTTP en
 
 Prerequisites on the host:
 
+- Alpine installed to a persistent disk in **sys** mode (see Path A step 1). Not diskless / live-ISO-only.
 - Reach the private HTTP endpoint the Nanite will call.
 - Outbound TCP 443 to the platform host (default `tealfabric.io`).
 - Disk for the state directory (default `/var/lib/tealfabric-nanite`), mode `0700`.
@@ -58,28 +59,52 @@ https://cdn.tealfabric.io/nanite/install.sh
 
 Run it on the Nanite VM with `curl … | sh -`. No repository checkout is required. On Alpine, `install.sh` installs Podman with `apk` when neither Docker nor Podman is present.
 
-### 1. Boot Alpine and become root
+### 1. Install Alpine to disk (`setup-alpine`, **sys** mode)
 
-Install Alpine as a VM (or use an existing Alpine guest). Log in and become root:
+Give the VM a virtual disk of at least **8 GiB** (see resources above). Boot the Alpine ISO, log in as root, and run the installer:
 
 ```sh
-su -
+setup-alpine
 ```
 
-### 2. Bring networking and base tools online
+Work through keyboard, hostname, interfaces, DNS, timezone, proxy, apk mirrors, SSH, and NTP as usual. At **Disk & Install**:
+
+1. Choose the VM disk (for example `sda` or `vda`). Do **not** accept `none`.
+2. Choose mode **`sys`** (traditional hard-disk install). That overwrites the chosen disk.
+
+When `setup-alpine` finishes, reboot and boot from the **disk** (remove or uncheck the ISO in the hypervisor). Log in as root on the installed system.
+
+Confirm root is on the disk, not tmpfs:
 
 ```sh
-setup-interfaces
-setup-dns
+findmnt /
+df -h /
+# Expect a block device (e.g. /dev/vda3), not tmpfs, for /
+```
+
+If you already completed networking on a live ISO and only need to install to disk:
+
+```sh
+lsblk
+setup-disk -m sys /dev/vda   # use the unused disk from lsblk
+reboot
+```
+
+**Diskless** (`disk=none`) or staying on the live ISO leaves `/` in RAM. Podman then fills `/var/tmp` on tmpfs and fails with `no space left on device` while loading the Nanite image. **data** mode (RAM OS + disk `/var`) can work but is not the documented path; use **sys**.
+
+### 2. Bring networking and base tools online (on the sys install)
+
+After reboot from disk, ensure networking is up (often already configured by `setup-alpine`):
+
+```sh
 rc-service networking start
 rc-update add networking boot
 ```
 
-Point apk at **online** `main` and `community` for your Alpine version. A CD/ISO install often leaves only `/media/cdrom/apks`; enabling community alone then fails (missing `libglib`, `gpg`, …) because those deps come from network `main`. Podman itself is in **community**.
+Point apk at **online** `main` and `community` for your Alpine version. After a CD/ISO-only session, apk may still list `/media/cdrom/apks`; on a finished **sys** install you normally want network mirrors. Podman is in **community**, not **main**.
 
 ```sh
 ver=$(cut -d. -f1,2 /etc/alpine-release)
-# Prefer network mirrors; leave cdrom commented out after first boot.
 cat >/etc/apk/repositories <<EOF
 https://dl-cdn.alpinelinux.org/alpine/v${ver}/main
 https://dl-cdn.alpinelinux.org/alpine/v${ver}/community
@@ -94,7 +119,7 @@ Confirm the host can reach the CDN and Tealfabric:
 curl -fsSI https://cdn.tealfabric.io/nanite/install.sh >/dev/null && echo ok
 ```
 
-If you skip this, `install.sh` still enables matching online `main` + `community` before `apk add podman`.
+If you skip the repository rewrite, `install.sh` still enables matching online `main` + `community` before `apk add podman`.
 
 ### 3. Install and enroll (one shot)
 
@@ -197,7 +222,7 @@ Use this when the disk should do little else and should self-upgrade with weekly
 
 ### 1. Install Alpine on the appliance disk
 
-Install Alpine to persistent storage (not a ramdisk-only live system). Boot, become root, and configure networking the same way as Path A steps 1–2.
+Same as Path A step 1: run `setup-alpine`, select the appliance disk, choose **`sys`**, reboot from that disk (not the ISO). Do not use diskless / live-ISO-only. Then configure networking and apk mirrors the same way as Path A step 2.
 
 ### 2. Add the Tealfabric Nanite apk repository
 

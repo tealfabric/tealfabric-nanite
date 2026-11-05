@@ -221,7 +221,9 @@ ensure_alpine_apk_repos() {
 
 install_alpine_podman() {
   ensure_alpine_apk_repos
-  apk add --no-cache podman
+  # iptables: netavark needs the iptables binary for the default bridge network.
+  # Nanite itself uses --network=host (below); still install iptables for tooling.
+  apk add --no-cache podman iptables ip6tables
   # cgroups are required for both rootful and rootless on Alpine.
   if command -v rc-update >/dev/null 2>&1; then
     rc-update add cgroups default 2>/dev/null || rc-update add cgroups boot 2>/dev/null || true
@@ -263,6 +265,12 @@ EOF
   exit 1
 fi
 
+# Alpine may already have podman from a prior attempt without iptables.
+if [ -f /etc/alpine-release ] && [ "$runtime" = podman ] && ! command -v iptables >/dev/null 2>&1; then
+  ensure_alpine_apk_repos
+  apk add --no-cache iptables ip6tables
+fi
+
 mkdir -p "$STATE_DIR"
 chmod 700 "$STATE_DIR"
 
@@ -271,7 +279,9 @@ case "$IMAGE" in
   http://*|https://*) is_http=1 ;;
 esac
 
-args="run -d --name $CONTAINER_NAME --restart=always"
+# Host network: Nanite only dials outbound (and binds health on 127.0.0.1). Avoids
+# netavark bridge/NAT, which fails on Alpine when iptables is missing.
+args="run -d --name $CONTAINER_NAME --restart=always --network=host"
 args="$args -v $STATE_DIR:/var/lib/tealfabric-nanite"
 args="$args -e TF_NANITE_PLATFORM_URL"
 args="$args -e TF_NANITE_STATE_DIR=/var/lib/tealfabric-nanite"

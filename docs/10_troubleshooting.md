@@ -44,6 +44,19 @@
 
 Redirects: a 302 is a successful forward of the response. The Nanite does not follow `Location`. If the client expected a followed redirect, change the integration URL to the final host and allowlist that host.
 
+## `netavark: iptables: No such file or directory`
+
+Podman's default bridge network calls `iptables` via netavark. Alpine's `podman` package does not always pull in `iptables`, so `podman run` fails after a successful image load.
+
+Current `install.sh` starts the Nanite with `--network=host` (outbound-only; health stays on `127.0.0.1`) and installs `iptables` / `ip6tables` on Alpine. Until that installer is on the CDN:
+
+```sh
+apk add iptables ip6tables
+podman rm -f tealfabric-nanite 2>/dev/null || true
+curl -fsSL https://cdn.tealfabric.io/nanite/install.sh | sh -
+# or: podman run ... --network=host ...
+```
+
 ## Alpine apk warns about rootless Podman / subuid
 
 After `apk add podman`, Alpine prints how to configure **rootless** Podman (`/etc/subuid`, `/etc/subgid`, `rc-service cgroups start`).
