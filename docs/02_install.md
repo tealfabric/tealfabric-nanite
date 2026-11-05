@@ -118,7 +118,7 @@ curl -fsSL https://cdn.tealfabric.io/nanite/install.sh | sh -
 
 What the script does, in order:
 
-1. Selects Podman or Docker, or on Alpine enables the **community** repo (Podman is not in `main`) and installs Podman with `apk`.
+1. Selects Podman or Docker, or on Alpine enables online **main** + **community**, installs Podman with `apk`, and starts `cgroups`. Run as root so Podman is rootful; Alpine’s rootless `subuid`/`subgid` warning then does not apply.
 2. Resolves the image, in order: `--image`, `TF_NANITE_IMAGE`, `NANITE_IMAGE_REF`, else `TF_NANITE_CHANNEL` / `--channel`, else `latest/release.json` → that release's archive for this arch.
 3. For an `https://` image URL: downloads the archive, verifies `SHA256SUMS` when present, reads `image_tag` from sibling `release.json`, and loads the image. For a non-URL reference: `pull`.
 4. Creates `/var/lib/tealfabric-nanite` mode `0700`.

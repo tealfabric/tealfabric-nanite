@@ -44,6 +44,14 @@
 
 Redirects: a 302 is a successful forward of the response. The Nanite does not follow `Location`. If the client expected a followed redirect, change the integration URL to the final host and allowlist that host.
 
+## Alpine apk warns about rootless Podman / subuid
+
+After `apk add podman`, Alpine prints how to configure **rootless** Podman (`/etc/subuid`, `/etc/subgid`, `rc-service cgroups start`).
+
+`install.sh` is meant to run as **root** and uses **rootful** Podman. In that case you can ignore the subuid/subgid part of the message. The script already starts the `cgroups` service.
+
+Only act on that warning if you install as a non-root user; then either re-run as root or add subordinate id ranges for that user.
+
 ## Alpine apk: `podman (no such package)` or missing `so:libglib` / `gpg`
 
 Podman is in Alpine **community**, not **main**. After an ISO install, `/etc/apk/repositories` often lists only `/media/cdrom/apks`. Adding **community** from the internet while **main** stays on the CD breaks dependency resolution (`so:libglib-2.0.so.0`, `gpg`, …).

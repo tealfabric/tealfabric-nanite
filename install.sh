@@ -79,7 +79,8 @@ download() {
   fi
 }
 
-# Resolve default image: pinned channel, else latest/release.json → release_key.
+# Resolve default image: pinned channel, else latest/release.json → release_key,
+# else fall back to nightly-build (common before the first semver / latest pointer).
 resolve_default_image() {
   arch=$(default_archive_arch)
   if [ -n "$CHANNEL" ]; then
@@ -89,6 +90,7 @@ resolve_default_image() {
 
   latest_meta="${CDN_BASE}/latest/release.json"
   latest_archive="${CDN_BASE}/latest/tealfabric-nanite-linux-${arch}.tar"
+  nightly_archive="${CDN_BASE}/nightly-build/tealfabric-nanite-linux-${arch}.tar"
 
   if [ "${TF_NANITE_INSTALL_DRY_RUN:-}" = "1" ]; then
     IMAGE=$latest_archive
@@ -114,7 +116,18 @@ resolve_default_image() {
     rm -f "$meta_tmp"
   fi
 
-  IMAGE=$latest_archive
+  # HEAD-check latest archive; if missing, use nightly-build.
+  if command -v curl >/dev/null 2>&1 && curl -fsSI "$latest_archive" >/dev/null 2>&1; then
+    IMAGE=$latest_archive
+    return
+  fi
+  if command -v wget >/dev/null 2>&1 && wget -q --spider "$latest_archive" 2>/dev/null; then
+    IMAGE=$latest_archive
+    return
+  fi
+
+  echo "CDN latest/ not published yet; falling back to nightly-build" >&2
+  IMAGE=$nightly_archive
 }
 
 if [ -z "$IMAGE" ]; then
@@ -205,10 +218,26 @@ ensure_alpine_apk_repos() {
 install_alpine_podman() {
   ensure_alpine_apk_repos
   apk add --no-cache podman
-  # Rootful podman needs cgroups on Alpine.
+  # cgroups are required for both rootful and rootless on Alpine.
   if command -v rc-update >/dev/null 2>&1; then
     rc-update add cgroups default 2>/dev/null || rc-update add cgroups boot 2>/dev/null || true
     rc-service cgroups start 2>/dev/null || true
+  fi
+  # apk's post-install warns about rootless (subuid/subgid). This installer runs
+  # rootful Podman when uid 0; ignore that warning. Non-root needs subordinate ids.
+  if [ "$(id -u)" -ne 0 ]; then
+    user=$(id -un)
+    if ! grep -q "^${user}:" /etc/subuid 2>/dev/null \
+      || ! grep -q "^${user}:" /etc/subgid 2>/dev/null; then
+      cat >&2 <<EOF
+Podman was installed, but this process is not root and ${user} has no
+/etc/subuid + /etc/subgid ranges (needed for rootless Podman).
+Re-run as root (recommended), or configure subordinate ids then re-run:
+  echo '${user}:100000:65536' >> /etc/subuid
+  echo '${user}:100000:65536' >> /etc/subgid
+EOF
+      exit 1
+    fi
   fi
 }
 
