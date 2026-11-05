@@ -8,8 +8,8 @@
 # Optional overrides:
 #   TF_NANITE_PLATFORM_URL  (default wss://tealfabric.io/api/v1/nanites/session)
 #   NANITE_IMAGE_REF / TF_NANITE_IMAGE / --image
-#     (default CDN nightly-build archive for this arch)
-#   TF_NANITE_CHANNEL / --channel  (default nightly-build)
+#     (default: latest semver from CDN latest/release.json)
+#   TF_NANITE_CHANNEL / --channel  (optional pin: 0.1.0 | nightly-build | …)
 #   curl … | sh -s -- --image REGISTRY/tealfabric-nanite:TAG
 #   [--ca-file PEM] [--state-dir DIR] [--name NAME]
 set -eu
@@ -21,7 +21,8 @@ CA_FILE=""
 STATE_DIR=${TF_NANITE_STATE_DIR:-/var/lib/tealfabric-nanite}
 CONTAINER_NAME=${TF_NANITE_CONTAINER_NAME:-tealfabric-nanite}
 RUN_TAG=${TF_NANITE_IMAGE_TAG:-}
-CHANNEL=${TF_NANITE_CHANNEL:-nightly-build}
+# Empty channel → resolve the latest published release (CDN nanite/latest/).
+CHANNEL=${TF_NANITE_CHANNEL:-}
 TF_NANITE_PLATFORM_URL=${TF_NANITE_PLATFORM_URL:-wss://tealfabric.io/api/v1/nanites/session}
 export TF_NANITE_PLATFORM_URL
 
@@ -65,8 +66,59 @@ default_archive_arch() {
   esac
 }
 
+download() {
+  url=$1
+  dest=$2
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$url" -o "$dest"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO "$dest" "$url"
+  else
+    echo "curl or wget is required to download ${url}" >&2
+    exit 1
+  fi
+}
+
+# Resolve default image: pinned channel, else latest/release.json → release_key.
+resolve_default_image() {
+  arch=$(default_archive_arch)
+  if [ -n "$CHANNEL" ]; then
+    IMAGE="${CDN_BASE}/${CHANNEL}/tealfabric-nanite-linux-${arch}.tar"
+    return
+  fi
+
+  latest_meta="${CDN_BASE}/latest/release.json"
+  latest_archive="${CDN_BASE}/latest/tealfabric-nanite-linux-${arch}.tar"
+
+  if [ "${TF_NANITE_INSTALL_DRY_RUN:-}" = "1" ]; then
+    IMAGE=$latest_archive
+    return
+  fi
+
+  meta_tmp=$(mktemp)
+  if download "$latest_meta" "$meta_tmp" 2>/dev/null; then
+    release_key=$(sed -n 's/.*"release_key"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$meta_tmp" | head -n 1)
+    archive_url=$(sed -n 's/.*"archive_url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$meta_tmp" | head -n 1)
+    rm -f "$meta_tmp"
+    if [ -n "$release_key" ]; then
+      IMAGE="${CDN_BASE}/${release_key}/tealfabric-nanite-linux-${arch}.tar"
+      echo "Using latest release ${release_key}"
+      return
+    fi
+    if [ -n "$archive_url" ]; then
+      IMAGE=$(printf '%s\n' "$archive_url" | sed "s|tealfabric-nanite-linux-[A-Za-z0-9_]*\.tar|tealfabric-nanite-linux-${arch}.tar|")
+      echo "Using latest archive ${IMAGE}"
+      return
+    fi
+  else
+    rm -f "$meta_tmp"
+  fi
+
+  IMAGE=$latest_archive
+}
+
 if [ -z "$IMAGE" ]; then
-  IMAGE="${CDN_BASE}/${CHANNEL}/tealfabric-nanite-linux-$(default_archive_arch).tar"
+  resolve_default_image
 fi
 
 if [ -z "${TF_NANITE_PLATFORM_URL:-}" ]; then
@@ -206,19 +258,6 @@ if [ -n "$CA_FILE" ]; then
   args="$args -v $CA_FILE:/etc/tealfabric-nanite/extra-ca.pem:ro"
   args="$args -e TF_NANITE_CA_BUNDLE=/etc/tealfabric-nanite/extra-ca.pem"
 fi
-
-download() {
-  url=$1
-  dest=$2
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$url" -o "$dest"
-  elif command -v wget >/dev/null 2>&1; then
-    wget -qO "$dest" "$url"
-  else
-    echo "curl or wget is required to download ${url}" >&2
-    exit 1
-  fi
-}
 
 load_archive() {
   archive_url=$1

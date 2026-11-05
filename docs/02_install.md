@@ -98,10 +98,10 @@ If you skip this, `install.sh` still enables matching online `main` + `community
 
 ### 3. Install and enroll (one shot)
 
-Paste the enrollment token from the Tealfabric console (valid for 15 minutes). Prefer the full console snippet: it sets `NANITE_IMAGE_REF` (and usually `TF_NANITE_PLATFORM_URL`) for you. Platform URL otherwise defaults to `wss://tealfabric.io/api/v1/nanites/session`. With no image override, the script downloads the CDN `nightly-build` archive for this architecture (`amd64` or `arm64`).
+Paste the enrollment token from the Tealfabric console (valid for 15 minutes). Prefer the full console snippet: it sets `NANITE_IMAGE_REF` (and usually `TF_NANITE_PLATFORM_URL`) for you. Platform URL otherwise defaults to `wss://tealfabric.io/api/v1/nanites/session`. With no image override, the script reads `https://cdn.tealfabric.io/nanite/latest/release.json` and downloads that release's archive for this architecture (`amd64` or `arm64`).
 
 ```sh
-# Minimal (uses CDN nightly-build when NANITE_IMAGE_REF is unset)
+# Minimal (uses CDN latest semver when NANITE_IMAGE_REF is unset)
 export TF_NANITE_ENROLLMENT_TOKEN='paste-once'
 curl -fsSL https://cdn.tealfabric.io/nanite/install.sh | sh -
 ```
@@ -119,7 +119,7 @@ curl -fsSL https://cdn.tealfabric.io/nanite/install.sh | sh -
 What the script does, in order:
 
 1. Selects Podman or Docker, or on Alpine enables the **community** repo (Podman is not in `main`) and installs Podman with `apk`.
-2. Resolves the image, in order: `--image`, `TF_NANITE_IMAGE`, `NANITE_IMAGE_REF`, else `https://cdn.tealfabric.io/nanite/<channel>/tealfabric-nanite-linux-<arch>.tar` (`channel` default `nightly-build`).
+2. Resolves the image, in order: `--image`, `TF_NANITE_IMAGE`, `NANITE_IMAGE_REF`, else `TF_NANITE_CHANNEL` / `--channel`, else `latest/release.json` → that release's archive for this arch.
 3. For an `https://` image URL: downloads the archive, verifies `SHA256SUMS` when present, reads `image_tag` from sibling `release.json`, and loads the image. For a non-URL reference: `pull`.
 4. Creates `/var/lib/tealfabric-nanite` mode `0700`.
 5. Starts the container with `--restart=always`, mounts the state directory, and passes the platform URL and enrollment token for the first run.
@@ -136,7 +136,7 @@ Set these before the `curl | sh -` line when needed:
 ```sh
 export TF_NANITE_PLATFORM_URL='wss://tealfabric.io/api/v1/nanites/session'   # default already
 export NANITE_IMAGE_REF='https://cdn.tealfabric.io/nanite/0.1.0/tealfabric-nanite-linux-amd64.tar'
-export TF_NANITE_CHANNEL=nightly-build
+export TF_NANITE_CHANNEL=0.1.0
 export TF_NANITE_STATE_DIR=/var/lib/tealfabric-nanite
 export TF_NANITE_CONTAINER_NAME=tealfabric-nanite
 ```
@@ -151,8 +151,8 @@ curl -fsSL https://cdn.tealfabric.io/nanite/install.sh | sh -s -- \
 
 | Flag / env | Purpose |
 |------------|---------|
-| `--image` / `TF_NANITE_IMAGE` / `NANITE_IMAGE_REF` | CDN archive URL or OCI pull reference. Default: CDN `nightly-build` for this arch. |
-| `--channel` / `TF_NANITE_CHANNEL` | CDN channel folder when no image is set (default `nightly-build`). |
+| `--image` / `TF_NANITE_IMAGE` / `NANITE_IMAGE_REF` | CDN archive URL or OCI pull reference. Default: latest semver from CDN `latest/`. |
+| `--channel` / `TF_NANITE_CHANNEL` | Pin a CDN folder (`0.1.0`, `nightly-build`, …) when no image is set. |
 | `--ca-file` | Corporate PEM mounted read-only as `TF_NANITE_CA_BUNDLE`. |
 | `--state-dir` / `TF_NANITE_STATE_DIR` | Host path for identity and bearer (default `/var/lib/tealfabric-nanite`). |
 | `--name` / `TF_NANITE_CONTAINER_NAME` | Container name (default `tealfabric-nanite`). |

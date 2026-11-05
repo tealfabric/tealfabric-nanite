@@ -134,7 +134,7 @@ test("install dry run accepts a CDN archive URL without downloading", () => {
   assert.equal(existsSync(log), false);
 });
 
-test("install dry run defaults to CDN nightly-build archive and platform URL", () => {
+test("install dry run defaults to CDN latest archive and platform URL", () => {
   const dir = mkdtempSync(join(tmpdir(), "nanite-install-default-"));
   const bin = join(dir, "bin");
   mkdirSync(bin);
@@ -155,10 +155,35 @@ test("install dry run defaults to CDN nightly-build archive and platform URL", (
   assert.equal(result.status, 0, result.stderr.toString());
   assert.match(
     result.stdout.toString(),
-    /download https:\/\/cdn\.tealfabric\.io\/nanite\/nightly-build\/tealfabric-nanite-linux-(amd64|arm64)\.tar/
+    /download https:\/\/cdn\.tealfabric\.io\/nanite\/latest\/tealfabric-nanite-linux-(amd64|arm64)\.tar/
   );
   assert.match(result.stdout.toString(), /TF_NANITE_PLATFORM_URL/);
   assert.equal(existsSync(log), false);
+});
+
+test("install dry run accepts an explicit CDN channel", () => {
+  const dir = mkdtempSync(join(tmpdir(), "nanite-install-channel-"));
+  const bin = join(dir, "bin");
+  mkdirSync(bin);
+  writeFileSync(join(bin, "podman"), "#!/bin/sh\necho podman-called >> \"$NANITE_PODMAN_LOG\"\n");
+  chmodSync(join(bin, "podman"), 0o755);
+  const result = spawnSync(
+    "sh",
+    [join(root, "install.sh"), "--channel", "0.1.0", "--state-dir", join(dir, "state")],
+    {
+      env: {
+        ...process.env,
+        PATH: `${bin}:${process.env.PATH ?? ""}`,
+        TF_NANITE_INSTALL_DRY_RUN: "1",
+        TF_NANITE_PLATFORM_URL: "wss://tealfabric.io/api/v1/nanites/session"
+      }
+    }
+  );
+  assert.equal(result.status, 0, result.stderr.toString());
+  assert.match(
+    result.stdout.toString(),
+    /download https:\/\/cdn\.tealfabric\.io\/nanite\/0\.1\.0\/tealfabric-nanite-linux-(amd64|arm64)\.tar/
+  );
 });
 
 test("install dry run accepts NANITE_IMAGE_REF from the Tealfabric snippet", () => {
