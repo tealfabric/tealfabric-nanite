@@ -18,11 +18,24 @@ export type LogLevel = "info" | "warn" | "error";
 
 type LogTargets = { stdout: boolean; syslog: boolean };
 
+/** Runtime unixgram API; @types/node only types udp4/udp6. */
+type UnixGramSocket = {
+  send(msg: Buffer, path: string, cb?: (err: Error | null) => void): void;
+  unref(): void;
+  close(): void;
+  on(event: "error", listener: (err: Error) => void): void;
+};
+
 let targets: LogTargets = { stdout: true, syslog: true };
 let syslogSocketPath = "/dev/log";
-let syslogSocket: dgram.Socket | null = null;
+let syslogSocket: UnixGramSocket | null = null;
 let syslogDisabled = false;
 const ident = "tealfabric-nanite";
+
+function createUnixGramSocket(): UnixGramSocket {
+  // unixgram is valid on Linux/macOS; typings omit it from SocketType.
+  return dgram.createSocket("unixgram" as unknown as dgram.SocketType) as unknown as UnixGramSocket;
+}
 
 /**
  * TF_NANITE_LOG: comma list of `stdout` and/or `syslog` (default both).
@@ -74,7 +87,7 @@ function writeSyslog(level: LogLevel, message: string): void {
   const packet = `<${pri}>${ident}[${process.pid}]: ${message}`;
   try {
     if (!syslogSocket) {
-      const socket = dgram.createSocket("unixgram");
+      const socket = createUnixGramSocket();
       socket.unref();
       socket.on("error", () => {
         syslogDisabled = true;
