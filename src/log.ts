@@ -1,4 +1,5 @@
-import dgram from "node:dgram";
+import { spawn } from "node:child_process";
+import { createConnection } from "node:net";
 
 const SECRET_KEYS = new Set([
   "secret",
@@ -11,6 +12,7 @@ const SECRET_KEYS = new Set([
 ]);
 
 const SEVERITY = { info: 6, warn: 4, error: 3 } as const;
+const LOGGER_PRIORITY = { info: "local0.info", warn: "local0.warning", error: "local0.err" } as const;
 /** syslog facility local0 */
 const FACILITY = 16;
 
@@ -18,28 +20,17 @@ export type LogLevel = "info" | "warn" | "error";
 
 type LogTargets = { stdout: boolean; syslog: boolean };
 
-/** Runtime unixgram API; @types/node only types udp4/udp6. */
-type UnixGramSocket = {
-  send(msg: Buffer, path: string, cb?: (err: Error | null) => void): void;
-  unref(): void;
-  close(): void;
-  on(event: "error", listener: (err: Error) => void): void;
-};
-
 let targets: LogTargets = { stdout: true, syslog: true };
 let syslogSocketPath = "/dev/log";
-let syslogSocket: UnixGramSocket | null = null;
 let syslogDisabled = false;
 const ident = "tealfabric-nanite";
 
-function createUnixGramSocket(): UnixGramSocket {
-  // unixgram is valid on Linux/macOS; typings omit it from SocketType.
-  return dgram.createSocket("unixgram" as unknown as dgram.SocketType) as unknown as UnixGramSocket;
-}
-
 /**
  * TF_NANITE_LOG: comma list of `stdout` and/or `syslog` (default both).
- * TF_NANITE_SYSLOG_SOCKET: unix datagram path (default `/dev/log`).
+ * TF_NANITE_SYSLOG_SOCKET: unix path for syslog (default `/dev/log`).
+ *
+ * Prefer the `logger` CLI (BusyBox/util-linux). If that is missing, write an
+ * RFC3164 line to the unix socket path (stream connect; works with many syslogds).
  */
 export function configureLog(env: NodeJS.ProcessEnv = process.env): void {
   const raw = (env.TF_NANITE_LOG ?? "stdout,syslog").trim().toLowerCase();
@@ -57,14 +48,6 @@ export function configureLog(env: NodeJS.ProcessEnv = process.env): void {
   }
   syslogSocketPath = (env.TF_NANITE_SYSLOG_SOCKET ?? "/dev/log").trim() || "/dev/log";
   syslogDisabled = false;
-  if (syslogSocket) {
-    try {
-      syslogSocket.close();
-    } catch {
-      /* ignore */
-    }
-    syslogSocket = null;
-  }
 }
 
 export function logEvent(level: LogLevel, event: string, fields: Record<string, unknown> = {}): void {
@@ -83,41 +66,54 @@ export function logEvent(level: LogLevel, event: string, fields: Record<string, 
 
 function writeSyslog(level: LogLevel, message: string): void {
   if (syslogDisabled) return;
-  const pri = FACILITY * 8 + SEVERITY[level];
-  const packet = `<${pri}>${ident}[${process.pid}]: ${message}`;
+  if (writeSyslogViaLogger(level, message)) return;
+  writeSyslogViaUnixSocket(level, message);
+}
+
+function writeSyslogViaLogger(level: LogLevel, message: string): boolean {
   try {
-    if (!syslogSocket) {
-      const socket = createUnixGramSocket();
-      socket.unref();
-      socket.on("error", () => {
-        syslogDisabled = true;
-        try {
-          socket.close();
-        } catch {
-          /* ignore */
-        }
-        if (syslogSocket === socket) syslogSocket = null;
-      });
-      syslogSocket = socket;
-    }
-    const socket = syslogSocket;
-    socket.send(Buffer.from(packet), syslogSocketPath, (err) => {
-      if (!err) return;
-      syslogDisabled = true;
-      try {
-        socket.close();
-      } catch {
-        /* ignore */
-      }
-      if (syslogSocket === socket) syslogSocket = null;
+    const child = spawn(
+      "logger",
+      ["-t", ident, "-p", LOGGER_PRIORITY[level], "--", message],
+      { stdio: "ignore", detached: true }
+    );
+    child.unref();
+    child.on("error", () => {
+      // Fall through to unix socket on next lines if logger is absent.
     });
+    return true;
   } catch {
-    syslogDisabled = true;
-    syslogSocket = null;
+    return false;
   }
 }
 
-/** Test hook: reset syslog failure latch and sockets. */
+function writeSyslogViaUnixSocket(level: LogLevel, message: string): void {
+  const pri = FACILITY * 8 + SEVERITY[level];
+  const packet = `<${pri}>${ident}[${process.pid}]: ${message}\n`;
+  try {
+    const socket = createConnection({ path: syslogSocketPath });
+    socket.unref();
+    socket.on("error", () => {
+      syslogDisabled = true;
+      try {
+        socket.destroy();
+      } catch {
+        /* ignore */
+      }
+    });
+    socket.end(packet, () => {
+      try {
+        socket.destroy();
+      } catch {
+        /* ignore */
+      }
+    });
+  } catch {
+    syslogDisabled = true;
+  }
+}
+
+/** Test hook: reset syslog failure latch. */
 export function resetLogForTests(): void {
   configureLog({ TF_NANITE_LOG: "stdout" });
   syslogDisabled = false;

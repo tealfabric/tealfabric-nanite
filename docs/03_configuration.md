@@ -38,7 +38,7 @@ JSON lines on stdout (and optionally local syslog). Secrets are never logged.
 
 Typical events: `nanite.start`, `nanite.session.connecting` / `open` / `hello` / `role` / `reconnect` / `dead`, `nanite.credential.renewed`, `nanite.allowlist`, `nanite.call`, plus config/enrollment errors.
 
-Container installs mount host `/dev/log` when present. On Alpine, enable a syslog daemon first (`rc-update add syslog boot && rc-service syslog start`, or equivalent). Inspect with `logread` (BusyBox) or `podman logs tealfabric-nanite` for stdout.
+Syslog uses the host `logger` command when available, otherwise a unix write to `TF_NANITE_SYSLOG_SOCKET`. Container installs mount host `/dev/log` when present. On Alpine, enable a syslog daemon first (`rc-update add syslog boot && rc-service syslog start`, or equivalent). Inspect with `logread` (BusyBox) or `podman logs tealfabric-nanite` for stdout.
 
 ## Local health
 
