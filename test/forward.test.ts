@@ -68,6 +68,46 @@ test("cancel aborts an open endpoint socket", async () => {
   server.close();
 });
 
+test("POST sends the method, headers, and body", async () => {
+  const body = Buffer.from('{"model":"system"}', "utf8");
+  let seen = "";
+  const server = http.createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    request.on("end", () => {
+      seen = [
+        request.method,
+        request.url,
+        request.headers["content-type"],
+        request.headers.authorization,
+        Buffer.concat(chunks).toString("utf8")
+      ].join("\n");
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end("{}");
+    });
+  });
+  const port = await listen(server);
+  try {
+    const result = await forwardHttp({
+      method: "POST",
+      url: `http://127.0.0.1:${port}/v1/chat/completions`,
+      headers: [
+        { name: "Content-Type", value: "application/json" },
+        { name: "Authorization", value: "Bearer secret" },
+        { name: "Connection", value: "close" }
+      ],
+      body,
+      signal: new AbortController().signal,
+      maxBytes: 1024
+    });
+    assert.equal(result.status, 200);
+    assert.equal(result.error, null);
+    assert.equal(seen, ["POST", "/v1/chat/completions", "application/json", "Bearer secret", body.toString("utf8")].join("\n"));
+  } finally {
+    server.close();
+  }
+});
+
 test("a file URL does not open a socket", async () => {
   const result = await forwardHttp({
     method: "GET",

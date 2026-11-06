@@ -67,6 +67,22 @@ export async function forwardHttp(input: {
   }
 }
 
+function requestHeaders(inputHeaders: Header[], body: Buffer, transportHeaders?: http.OutgoingHttpHeaders | readonly string[]): http.OutgoingHttpHeaders {
+  const headers: http.OutgoingHttpHeaders = {};
+  if (transportHeaders && !Array.isArray(transportHeaders)) {
+    for (const [name, value] of Object.entries(transportHeaders)) {
+      if (value !== undefined) headers[name] = value;
+    }
+  }
+  for (const header of inputHeaders) {
+    const name = header.name.trim().toLowerCase();
+    if (!name || HOP.has(name)) continue;
+    headers[name] = header.value;
+  }
+  if (body.length > 0) headers["content-length"] = String(body.length);
+  return headers;
+}
+
 async function sendRequest(target: URL, input: {
   method: string;
   headers: Header[];
@@ -76,12 +92,11 @@ async function sendRequest(target: URL, input: {
   maxBytes: number;
   ca?: string[];
 }): Promise<ForwardResult> {
-  const headerMap: Record<string, string> = {};
-  for (const header of input.headers) headerMap[header.name] = header.value;
-  if (input.body.length > 0) headerMap["content-length"] = String(input.body.length);
   const opened = await openTransport(target, input.proxyUrl ?? null, input.signal, input.ca);
+  const method = input.method.trim().toUpperCase() || "GET";
+  const headers = requestHeaders(input.headers, input.body, opened.options.headers);
   const response = await new Promise<http.IncomingMessage>((resolve, reject) => {
-    const request = opened.module.request(opened.options, resolve);
+    const request = opened.module.request({ ...opened.options, method, headers }, resolve);
     const fail = (error: Error) => {
       request.destroy();
       reject(error);
