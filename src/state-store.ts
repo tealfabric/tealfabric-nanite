@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseAllowlistEntries } from "./allowlist.js";
@@ -7,8 +8,13 @@ export type StoredState = {
   tenantId: string | null;
   naniteId: string | null;
   bearer: string | null;
+  consumedEnrollmentSha256: string | null;
   allowlist: AllowlistDocument;
 };
+
+export function sha256Hex(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
 
 function readTrim(path: string): string | null {
   if (!existsSync(path)) return null;
@@ -42,6 +48,7 @@ export class StateStore {
       tenantId: readTrim(this.file("tenant_id")),
       naniteId: readTrim(this.file("nanite_id")),
       bearer: readTrim(this.file("bearer")),
+      consumedEnrollmentSha256: readTrim(this.file("enrollment_token.sha256")),
       allowlist
     };
   }
@@ -55,6 +62,10 @@ export class StateStore {
     this.write("bearer", secret);
   }
 
+  saveConsumedEnrollment(tokenSha256: string): void {
+    this.write("enrollment_token.sha256", tokenSha256);
+  }
+
   saveAllowlist(generation: number, entries: AllowlistEntry[]): void {
     this.write("allowlist.json", JSON.stringify({ generation, entries }));
   }
@@ -65,7 +76,7 @@ export class StateStore {
 
   wipe(): void {
     this.ensure();
-    for (const name of ["tenant_id", "nanite_id", "bearer", "allowlist.json", "upgrade.deferred"]) {
+    for (const name of ["tenant_id", "nanite_id", "bearer", "enrollment_token.sha256", "allowlist.json", "upgrade.deferred"]) {
       rmSync(this.file(name), { force: true });
     }
   }

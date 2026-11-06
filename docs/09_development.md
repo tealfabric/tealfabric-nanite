@@ -44,7 +44,7 @@ Coverage includes:
 | Session machine: bearer, role, duplicate `call_id`, cancel | `test/session-machine.test.ts` |
 | Redirect not followed, cancel abort, `file:` denied | `test/forward.test.ts` |
 | Hostname and SPKI pin | `test/tls-peer.test.ts` |
-| `already_enrolled`, pin+CA refuse, `revoke-local` | `test/launch.test.ts` |
+| New enrollment token replaces a stored bearer; the same token resumes; pin+CA refuse; `revoke-local` | `test/launch.test.ts` |
 | Entrypoint CA merge, upgrade idle gate, install dry run | `test/scripts.test.ts` |
 | Contract copy equals platform plan | `test/contract-copy.test.ts` |
 

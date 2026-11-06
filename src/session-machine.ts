@@ -30,7 +30,7 @@ export class SessionMachine {
   constructor(readonly version: string, mode: "enroll" | "resume", secret: string, restored?: { naniteId: string; tenantId: string; generation: number; entries: AllowlistEntry[] }) {
     if (mode === "enroll") this.enrollmentToken = secret;
     else this.bearer = secret;
-    if (restored) {
+    if (mode === "resume" && restored) {
       this.naniteId = restored.naniteId;
       this.tenantId = restored.tenantId;
       this.generation = restored.generation;

@@ -9,15 +9,15 @@ The Nanite is code that runs on the tenant network. It receives prepared HTTP re
 | Stage | Mechanism |
 |-------|-----------|
 | Transport | TLS to the hostname in `TF_NANITE_PLATFORM_URL`. |
-| First enroll | One-time enrollment token in `hello.auth` with `method: enrollment_token`. |
-| Later sessions | Bearer secret in `hello.auth` with `method: bearer`. |
+| First enroll, and a new token | One-time enrollment token in `hello.auth` with `method: enrollment_token` and an empty `nanite_id`. |
+| Later sessions | Bearer secret in `hello.auth` with `method: bearer` and the stored `nanite_id`. |
 | Platform storage | Tealfabric stores SHA-256 hashes of enrollment tokens and bearer secrets. The hash algorithm is not a wire field. |
 
 There is no Nanite client certificate in v1. Clock skew over 60 seconds on `hello.sent_at` is rejected with `clock_skew`.
 
 ## Enrollment binding
 
-When `tenant_id` already exists in the state directory and no bearer is present, a new enrollment token is refused locally (`already_enrolled`) and no WebSocket is opened. That prevents a second tenant from claiming an installed state directory by pasting another token.
+A new `TF_NANITE_ENROLLMENT_TOKEN` replaces the identity in this state directory. The hello for that enrollment sends an empty `nanite_id`. After `hello_ok`, the process stores the new `nanite_id`, `tenant_id`, and bearer, and records the SHA-256 of that token so a later start with the same token resumes. Two tenants on one host are still two state directories and two processes. `revoke-local` wipes the directory, including the consumed-token hash.
 
 ## Allowlist
 

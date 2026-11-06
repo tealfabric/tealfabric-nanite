@@ -383,10 +383,18 @@ fi
 
 if [ "$is_http" -eq 1 ]; then
   load_archive "$IMAGE"
+else
+  "$runtime" pull "$IMAGE"
+fi
+
+# Replace a previous container of this name so a new enrollment token reaches the process.
+# The state directory is a volume and is kept. Removal happens after the image is loaded.
+"$runtime" rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
+
+if [ "$is_http" -eq 1 ]; then
   # shellcheck disable=SC2086
   "$runtime" $args "$RUN_TAG"
 else
-  "$runtime" pull "$IMAGE"
   # shellcheck disable=SC2086
   "$runtime" $args "$IMAGE"
 fi

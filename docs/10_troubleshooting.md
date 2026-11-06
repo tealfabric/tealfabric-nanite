@@ -7,7 +7,7 @@
 | `TF_NANITE_PLATFORM_URL is required` | Export the `wss://…/api/v1/nanites/session` URL from the Tealfabric snippet. |
 | `TF_NANITE_STATE_DIR is required` | Set a writable directory. |
 | `enrollment token or bearer secret is required` | Pass `TF_NANITE_ENROLLMENT_TOKEN` on first enroll, or keep an existing `bearer` file. |
-| `nanite.already_enrolled` | State directory already has `tenant_id` without a usable bearer. Wipe with `revoke-local` or use a fresh directory. Do not paste a second tenant's token into an existing install. |
+| `nanite.enrollment_failed` with `unauthorized`, platform reason `nanite_missing` | The node is still sending a stored bearer for a Nanite id this platform does not have. Start it with a new `TF_NANITE_ENROLLMENT_TOKEN` from the Nanite that exists in the console. The hello must use `enrollment_token` and an empty `nanite_id`. |
 | `nanite.enrollment_failed` with `expired` | Token older than 15 minutes or already used. Issue a new token in Tealfabric. |
 | `unauthorized` / `revoked` | Wrong token, wrong Nanite, or console revoke. |
 | `clock_skew` | Host clock off by more than 60 seconds from Tealfabric. Sync NTP. |

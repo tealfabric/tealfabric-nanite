@@ -78,7 +78,7 @@ Corporate intercepting proxies use `--ca-file`. That file and an SPKI pin shippe
 |----------|----------|---------|
 | `TF_NANITE_PLATFORM_URL` | yes | `wss://…/api/v1/nanites/session` |
 | `TF_NANITE_STATE_DIR` | yes | Bearer secret, `nanite_id`, `tenant_id`, cached allowlist. Mode `0700`. |
-| `TF_NANITE_ENROLLMENT_TOKEN` | enroll only | Removed from the environment after a successful enroll. Ignored once a bearer secret exists. |
+| `TF_NANITE_ENROLLMENT_TOKEN` | enroll, and a later new token | Removed from the process environment after a successful enroll. A token that already succeeded resumes the stored bearer. A different token enrolls again with an empty `nanite_id`. |
 | `TF_NANITE_CA_BUNDLE` | no | Extra PEM appended by the entrypoint. Mutually exclusive with a built-in SPKI pin. |
 | `HTTPS_PROXY` / `NO_PROXY` | no | Proxy for the control channel only. |
 | `TF_NANITE_ENDPOINT_PROXY` | no | Proxy for endpoint calls. Leave unset when endpoint calls stay on the LAN. |
@@ -109,8 +109,8 @@ Logs include `call_id`, `nanite_id`, `tenant_id`, `integration_id`, destination 
 
 | File in the state directory | Rule |
 |-----------------------------|------|
-| `tenant_id` | Written from `hello_ok`. A later enrollment token is refused locally with `already_enrolled` and does not open a session. |
-| `nanite_id` | Written at the same time. Later `hello` frames send this id. |
+| `tenant_id` | Written from `hello_ok`. A new enrollment token replaces it when that enrollment's `hello_ok` arrives. |
+| `nanite_id` | Written at the same time. A resume `hello` sends this id. An enroll `hello` sends an empty `nanite_id`. |
 | Bearer secret | Mode `0600`. Presented as `auth.method` `bearer`. |
 | Allowlist cache | Last acked generation. The admin does not edit this file. |
 
@@ -385,7 +385,7 @@ The platform stores only a hash of the enrollment token and only a hash of the b
 
 ### Enrollment state on the Nanite
 
-`already_enrolled` is not a frame. When the state directory already contains `tenant_id`, the process refuses another enrollment token locally and does not open a session.
+A new enrollment token is not refused locally. The process opens a session and sends `hello` with an empty `nanite_id`. The token that already succeeded in this directory resumes with the bearer.
 
 ### Limits
 
@@ -426,9 +426,9 @@ End of session contract.
 
 ### Phase 1 — Enroll and heartbeat
 
-Image, state directory, `hello` / `hello_ok` / heartbeat, `already_enrolled` when the directory is already bound.
+Image, state directory, `hello` / `hello_ok` / heartbeat, and a new enrollment token replacing a stored identity.
 
-**Exit:** the image enrolls, survives a dropped session by reconnecting with the bearer secret, and refuses a second enrollment token without opening a socket.
+**Exit:** the image enrolls, survives a dropped session by reconnecting with the bearer secret, and a new enrollment token opens an enroll session with an empty `nanite_id`.
 
 ### Phase 2 — HTTP forward
 
@@ -453,7 +453,7 @@ SPKI pin supplied at build, proxy environment variables, `clock_skew` when `sent
 ## 11) Tests
 
 - Reject a TLS certificate for a different hostname. Reject a pin mismatch.
-- `already_enrolled` opens no session.
+- A new enrollment token opens an enroll session even when a bearer is already stored. The same token after success resumes.
 - Allowlist: matching host succeeds. Another host, another port, a `file:` URL, and a redirect off the list do not dial the second host.
 - Expired `expires_at` does not open an endpoint socket.
 - Duplicate `call_id` does not call the endpoint twice.

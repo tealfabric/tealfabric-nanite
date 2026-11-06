@@ -13,7 +13,7 @@ All runtime configuration is environment variables. The Alpine appliance also lo
 
 | Variable | Required | Purpose |
 |----------|----------|---------|
-| `TF_NANITE_ENROLLMENT_TOKEN` | First enroll only | One-time token from Tealfabric. Ignored once a bearer secret exists on disk. Cleared from the process environment after a successful enroll. |
+| `TF_NANITE_ENROLLMENT_TOKEN` | First enroll, and any later re-enroll | One-time token from Tealfabric. A token that has not already succeeded in this state directory starts enrollment and replaces `nanite_id`, `tenant_id`, and `bearer` when `hello_ok` arrives. The same token after that success is ignored and the stored bearer resumes. Cleared from the process environment after a successful enroll. |
 | `TF_NANITE_CONTAINER_NAME` | No | Container name used by `install.sh`. Default `tealfabric-nanite`. |
 
 ## TLS and proxies

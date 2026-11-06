@@ -9,7 +9,7 @@ import { callLogFields, logEvent } from "./log.js";
 import { readSpkiPin } from "./pin.js";
 import { controlProxyUrl, endpointProxyUrl } from "./proxy-select.js";
 import { SessionMachine, type Directive } from "./session-machine.js";
-import type { StateStore } from "./state-store.js";
+import { sha256Hex, type StateStore } from "./state-store.js";
 import { assertPeerCertificate, PeerRejected } from "./tls-peer.js";
 import type { HealthState } from "./health.js";
 
@@ -45,7 +45,10 @@ export async function startSession(input: {
     if (outcome.kind === "stop") return;
     if (outcome.kind === "enrollment_failed") throw new EnrollmentFailed(outcome.code);
     const stored = input.state.load();
-    if (stored.bearer) {
+    if (mode === "enroll" && stored.bearer && stored.consumedEnrollmentSha256 === sha256Hex(secret)) {
+      mode = "resume";
+      secret = stored.bearer;
+    } else if (mode !== "enroll" && stored.bearer) {
       mode = "resume";
       secret = stored.bearer;
     }
@@ -67,17 +70,20 @@ async function connectOnce(input: {
   signal: AbortSignal;
 }): Promise<{ kind: "stop" } | { kind: "retry" } | { kind: "enrollment_failed"; code: string }> {
   const stored = input.state.load();
-  const machine = new SessionMachine(input.version, input.mode, input.secret, stored.naniteId && stored.tenantId ? {
-    naniteId: stored.naniteId,
-    tenantId: stored.tenantId,
-    generation: stored.allowlist.generation,
-    entries: stored.allowlist.entries
-  } : undefined);
+  const restored = input.mode === "resume" && stored.naniteId && stored.tenantId
+    ? {
+        naniteId: stored.naniteId,
+        tenantId: stored.tenantId,
+        generation: stored.allowlist.generation,
+        entries: stored.allowlist.entries
+      }
+    : undefined;
+  const machine = new SessionMachine(input.version, input.mode, input.secret, restored);
   const target = new URL(input.platformUrl);
   logEvent("info", "nanite.session.connecting", {
     platform_host: target.hostname,
     mode: input.mode,
-    nanite_id: stored.naniteId || null
+    nanite_id: machine.naniteId || null
   });
   const pin = readSpkiPin(input.env);
   const ca = platformCa(input.env);
@@ -179,6 +185,7 @@ async function connectOnce(input: {
       }
       if (directive.op === "store_bearer") {
         input.state.saveBearer(directive.secret);
+        if (directive.reason === "enroll") input.state.saveConsumedEnrollment(sha256Hex(input.secret));
         delete input.env.TF_NANITE_ENROLLMENT_TOKEN;
         if (directive.reason === "renew") {
           logEvent("info", "nanite.credential.renewed", { nanite_id: machine.naniteId, tenant_id: machine.tenantId });

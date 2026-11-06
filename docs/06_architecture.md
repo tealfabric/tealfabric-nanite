@@ -32,7 +32,7 @@ The Nanite is the only process in this repository that speaks the session contra
 
 ## Session lifecycle
 
-1. **Startup** — `startupPlan` chooses enroll, resume, refuse (`already_enrolled`), or missing credentials.
+1. **Startup** — `startupPlan` chooses enroll, resume, or missing credentials. A new enrollment token enrolls. The token that already succeeded resumes when a bearer is stored.
 2. **Connect** — TLS WebSocket to `TF_NANITE_PLATFORM_URL`. Optional control proxy. Peer check: hostname, then pin when present.
 3. **Hello** — Enrollment token with empty `nanite_id`, or bearer with stored `nanite_id`.
 4. **Hello OK** — Store identity and optional bearer. Cache allowlist and send `allowlist_ack`. Adopt `role` and `max_in_flight`.

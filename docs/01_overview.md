@@ -39,7 +39,7 @@ Both shapes need outbound TCP 443 to Tealfabric and a state directory. Neither n
 
 ## One process, one tenant
 
-The state directory binds the process to one `tenant_id` and one `nanite_id`. A second enrollment token is refused locally (`already_enrolled`) and does not open a session. Two tenants on one host are two state directories and two processes. Wiping the state directory retires the install. A new token then enrolls a new `nanite_id`.
+The state directory binds the process to one `tenant_id` and one `nanite_id`. A new enrollment token replaces that identity: the hello uses an empty `nanite_id`, and `hello_ok` writes the new ids and bearer. The same token on a later start resumes the stored bearer. Two tenants on one host are two state directories and two processes. Wiping the state directory retires the install.
 
 ## Where the allowlist lives
 

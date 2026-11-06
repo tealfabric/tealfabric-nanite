@@ -6,6 +6,7 @@ import { BODY_MAX_BYTES } from "../src/constants.js";
 import { backoffMs, helloRejectDisposition } from "../src/backoff.js";
 import { clockSkewed } from "../src/clock.js";
 import { callLogFields, configureLog, logEvent } from "../src/log.js";
+import { sha256Hex } from "../src/state-store.js";
 import { caPinConflict, startupPlan } from "../src/startup.js";
 import type { AllowlistEntry } from "../src/types.js";
 
@@ -137,10 +138,13 @@ test("stale allowlist generation does not dial", () => {
   if (decision.kind === "reject") assert.equal(decision.code, "allowlist_stale");
 });
 
-test("already_enrolled is local and a bearer ignores a new enrollment token", () => {
-  assert.deepEqual(startupPlan({ tenantId: "tenant-1", bearer: null }, "token"), { action: "refuse", reason: "already_enrolled" });
-  assert.equal(startupPlan({ tenantId: "tenant-1", bearer: "secret" }, "token").action, "resume");
-  assert.equal(startupPlan({ tenantId: null, bearer: null }, "token").action, "enroll");
+test("a new enrollment token replaces stored identity and the same token resumes", () => {
+  const used = sha256Hex("token");
+  assert.equal(startupPlan({ bearer: "secret", consumedEnrollmentSha256: used }, "token").action, "resume");
+  assert.equal(startupPlan({ bearer: "secret", consumedEnrollmentSha256: used }, "next-token").action, "enroll");
+  assert.equal(startupPlan({ bearer: null, consumedEnrollmentSha256: null }, "token").action, "enroll");
+  assert.equal(startupPlan({ bearer: null, consumedEnrollmentSha256: used }, "token").action, "missing_credentials");
+  assert.equal(startupPlan({ bearer: "secret", consumedEnrollmentSha256: null }, null).action, "resume");
 });
 
 test("a pin and a CA bundle together are refused", () => {

@@ -62,7 +62,7 @@ Closed set: `dns`, `connect_failed`, `tls`, `timeout`, `allowlist_denied`, `body
 
 ## Local-only rule
 
-`already_enrolled` is not a wire frame. When the state directory already contains `tenant_id` and no bearer is present, the process refuses another enrollment token locally and does not open a session.
+A new enrollment token is not refused locally. The process opens a session and sends `hello` with an empty `nanite_id` and `method: enrollment_token`. After that token has succeeded, a later start with the same token resumes with the bearer.
 
 ## Full text
 

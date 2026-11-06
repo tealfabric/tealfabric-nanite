@@ -32,10 +32,6 @@ export async function launch(options: {
   const state = store.load();
   const token = (env.TF_NANITE_ENROLLMENT_TOKEN ?? "").trim() || null;
   const plan = startupPlan(state, token);
-  if (plan.action === "refuse") {
-    logEvent("error", "nanite.already_enrolled", { tenant_id: state.tenantId });
-    return 1;
-  }
   if (plan.action === "missing_credentials") {
     logEvent("error", "nanite.config", { message: "enrollment token or bearer secret is required" });
     return 1;

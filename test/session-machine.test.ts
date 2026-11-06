@@ -34,6 +34,20 @@ function call(id: string): string {
   });
 }
 
+test("enrollment hello does not send a previously stored nanite id", () => {
+  const session = new SessionMachine("0.1.0", "enroll", "new-token", {
+    naniteId: "old-nanite",
+    tenantId: "old-tenant",
+    generation: 3,
+    entries: []
+  });
+  const hello = session.buildHello("2026-11-06T10:00:00.000Z");
+  assert.equal(hello.nanite_id, "");
+  const auth = hello.auth as { method: string; secret: string };
+  assert.equal(auth.method, "enrollment_token");
+  assert.equal(auth.secret, "new-token");
+});
+
 test("hello_ok stores the bearer and the next hello uses it", () => {
   const session = machine();
   const hello = session.buildHello("2026-11-04T12:00:00.000Z");
