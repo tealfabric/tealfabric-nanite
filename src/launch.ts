@@ -1,7 +1,7 @@
 import { DEFAULT_HEALTH_PORT } from "./constants.js";
 import { startHealthServer } from "./health.js";
 import type { HealthState } from "./health.js";
-import { logEvent } from "./log.js";
+import { configureLog, logEvent } from "./log.js";
 import { readSpkiPin } from "./pin.js";
 import { EnrollmentFailed, sayGoodbyeAndClose, startSession } from "./runtime.js";
 import { StateStore } from "./state-store.js";
@@ -14,6 +14,7 @@ export async function launch(options: {
   start?: typeof startSession;
 }): Promise<number> {
   const env = options.env;
+  configureLog(env);
   const pin = readSpkiPin(env);
   if (caPinConflict(env.TF_NANITE_CA_BUNDLE, pin)) {
     logEvent("error", "nanite.config", { message: "TF_NANITE_CA_BUNDLE and the SPKI pin cannot both be set" });
@@ -44,6 +45,17 @@ export async function launch(options: {
     logEvent("error", "nanite.config", { message: "TF_NANITE_PLATFORM_URL is required" });
     return 1;
   }
+  logEvent("info", "nanite.start", {
+    version: packageVersion(),
+    mode: plan.action,
+    platform_host: (() => {
+      try {
+        return new URL(platformUrl).hostname;
+      } catch {
+        return null;
+      }
+    })()
+  });
   const health: HealthState = {
     enrolled: Boolean(state.tenantId),
     tenantId: state.tenantId,

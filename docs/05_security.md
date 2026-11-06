@@ -59,7 +59,7 @@ State directory mode is `0700`. Prefer a dedicated OS user for the Alpine packag
 
 ## Logging
 
-Logs omit enrollment tokens, bearer secrets, endpoint bodies, and `Authorization` headers. Prefer that policy when shipping logs to a central collector.
+Logs (stdout and optional local syslog) omit enrollment tokens, bearer secrets, endpoint bodies, and `Authorization` headers. Prefer that policy when shipping logs to a central collector. See [Configuration](03_configuration.md) for `TF_NANITE_LOG`.
 
 ## Network exposure
 

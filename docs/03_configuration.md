@@ -27,6 +27,19 @@ All runtime configuration is environment variables. The Alpine appliance also lo
 | `NO_PROXY` / `no_proxy` | Hosts that skip the control-channel proxy. |
 | `TF_NANITE_ENDPOINT_PROXY` | Proxy for endpoint HTTP calls. Leave unset when those calls stay on the LAN. |
 
+## Logging
+
+JSON lines on stdout (and optionally local syslog). Secrets are never logged.
+
+| Variable | Purpose |
+|----------|---------|
+| `TF_NANITE_LOG` | Comma list: `stdout`, `syslog`, or `both` (default `stdout,syslog`). |
+| `TF_NANITE_SYSLOG_SOCKET` | Unix datagram path for syslog. Default `/dev/log`. |
+
+Typical events: `nanite.start`, `nanite.session.connecting` / `open` / `hello` / `role` / `reconnect` / `dead`, `nanite.credential.renewed`, `nanite.allowlist`, `nanite.call`, plus config/enrollment errors.
+
+Container installs mount host `/dev/log` when present. On Alpine, enable a syslog daemon first (`rc-update add syslog boot && rc-service syslog start`, or equivalent). Inspect with `logread` (BusyBox) or `podman logs tealfabric-nanite` for stdout.
+
 ## Local health
 
 | Variable | Purpose |

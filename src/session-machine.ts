@@ -7,9 +7,10 @@ export type Directive =
   | { op: "send"; frame: Record<string, unknown> }
   | { op: "dial"; callId: string; request: PreparedRequest; source: Record<string, unknown> }
   | { op: "abort"; callId: string }
-  | { op: "store_bearer"; secret: string }
+  | { op: "store_bearer"; secret: string; reason: "enroll" | "renew" }
   | { op: "store_identity"; naniteId: string; tenantId: string }
   | { op: "store_allowlist"; generation: number; entries: AllowlistEntry[] }
+  | { op: "set_role"; role: "active" | "standby" }
   | { op: "exit" }
   | { op: "reconnect"; code: string };
 
@@ -66,8 +67,9 @@ export class SessionMachine {
     if (type === "allowlist") return this.onAllowlist(frame);
     if (type === "role") {
       const role = frame.role === "standby" ? "standby" : frame.role === "active" ? "active" : "";
-      if (role) this.role = role;
-      return [];
+      if (!role) return [];
+      this.role = role;
+      return [{ op: "set_role", role }];
     }
     if (type === "credential") return this.onCredential(frame);
     if (type === "cancel") {
@@ -108,9 +110,10 @@ export class SessionMachine {
     if (typeof secret === "string" && secret) {
       this.bearer = secret;
       this.enrollmentToken = null;
-      directives.push({ op: "store_bearer", secret });
+      directives.push({ op: "store_bearer", secret, reason: "enroll" });
     }
     this.role = frame.role === "standby" ? "standby" : "active";
+    directives.push({ op: "set_role", role: this.role });
     const heartbeat = Number(frame.heartbeat_interval_seconds);
     if (Number.isFinite(heartbeat) && heartbeat > 0) this.heartbeatSeconds = heartbeat;
     const maxInFlight = Number(frame.max_in_flight);
@@ -142,7 +145,7 @@ export class SessionMachine {
     this.bearer = secret;
     this.enrollmentToken = null;
     return [
-      { op: "store_bearer", secret },
+      { op: "store_bearer", secret, reason: "renew" },
       { op: "send", frame: { type: "credential_ack" } }
     ];
   }

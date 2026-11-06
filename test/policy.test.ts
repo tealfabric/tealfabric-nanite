@@ -5,7 +5,7 @@ import { evaluateCall } from "../src/call-policy.js";
 import { BODY_MAX_BYTES } from "../src/constants.js";
 import { backoffMs, helloRejectDisposition } from "../src/backoff.js";
 import { clockSkewed } from "../src/clock.js";
-import { callLogFields, logEvent } from "../src/log.js";
+import { callLogFields, configureLog, logEvent } from "../src/log.js";
 import { caPinConflict, startupPlan } from "../src/startup.js";
 import type { AllowlistEntry } from "../src/types.js";
 
@@ -110,6 +110,7 @@ test("a body over the contract cap is body_too_large and is not logged", () => {
   console.log = (line?: unknown) => {
     lines.push(String(line));
   };
+  configureLog({ TF_NANITE_LOG: "stdout" });
   try {
     logEvent("info", "nanite.call", {
       ...callLogFields({

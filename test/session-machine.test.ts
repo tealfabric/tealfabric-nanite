@@ -45,7 +45,10 @@ test("hello_ok stores the bearer and the next hello uses it", () => {
     bearer_secret: "bearer-2",
     not_after: "2026-12-04T12:00:00.000Z"
   }), Date.now());
-  assert.equal(directives.some((item) => item.op === "store_bearer" && item.op === "store_bearer" && item.secret === "bearer-2"), true);
+  assert.equal(
+    directives.some((item) => item.op === "store_bearer" && item.secret === "bearer-2" && item.reason === "renew"),
+    true
+  );
   const next = session.buildHello("2026-11-04T12:10:00.000Z");
   assert.equal((next.auth as { secret: string }).secret, "bearer-2");
 });
@@ -54,7 +57,8 @@ test("only the active role dials, and a repeated call_id does not dial again", (
   const session = machine();
   session.role = "standby";
   assert.equal(session.onMessage(call("c1"), Date.parse("2026-11-04T12:00:30.000Z")).some((item) => item.op === "dial"), false);
-  session.onMessage(JSON.stringify({ type: "role", role: "active" }), Date.now());
+  const roleDirs = session.onMessage(JSON.stringify({ type: "role", role: "active" }), Date.now());
+  assert.deepEqual(roleDirs, [{ op: "set_role", role: "active" }]);
   const first = session.onMessage(call("c1"), Date.parse("2026-11-04T12:00:30.000Z"));
   assert.equal(first.some((item) => item.op === "dial"), true);
   const second = session.onMessage(call("c1"), Date.parse("2026-11-04T12:00:31.000Z"));

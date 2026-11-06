@@ -70,6 +70,13 @@ When the Nanite is offline, Tealfabric fails the integration call immediately (`
 
 `SIGTERM` and `SIGINT` set goodbye, send `{ "type": "goodbye" }` when the socket is open, finish an endpoint call that has already started, and exit. OpenRC and container stop use this path. A new call is not started after goodbye.
 
+## Logs
+
+```sh
+podman logs -f tealfabric-nanite          # container stdout JSON
+logread | grep tealfabric-nanite          # Alpine BusyBox syslog, when enabled
+```
+
 ## Support data
 
 When collecting logs for support, strip or avoid pasting:

@@ -283,6 +283,10 @@ esac
 # netavark bridge/NAT, which fails on Alpine when iptables is missing.
 args="run -d --name $CONTAINER_NAME --restart=always --network=host"
 args="$args -v $STATE_DIR:/var/lib/tealfabric-nanite"
+# Host syslog socket so JSON events reach local syslog (TF_NANITE_LOG includes syslog).
+if [ -e /dev/log ]; then
+  args="$args -v /dev/log:/dev/log"
+fi
 args="$args -e TF_NANITE_PLATFORM_URL"
 args="$args -e TF_NANITE_STATE_DIR=/var/lib/tealfabric-nanite"
 if [ -n "${TF_NANITE_ENROLLMENT_TOKEN:-}" ]; then

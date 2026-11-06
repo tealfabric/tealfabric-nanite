@@ -74,6 +74,11 @@ async function connectOnce(input: {
     entries: stored.allowlist.entries
   } : undefined);
   const target = new URL(input.platformUrl);
+  logEvent("info", "nanite.session.connecting", {
+    platform_host: target.hostname,
+    mode: input.mode,
+    nanite_id: stored.naniteId || null
+  });
   const pin = readSpkiPin(input.env);
   const ca = platformCa(input.env);
   const proxy = controlProxyUrl(input.env, target.hostname);
@@ -135,6 +140,11 @@ async function connectOnce(input: {
     ws.on("open", () => {
       input.health.connected = true;
       lastInbound = Date.now();
+      logEvent("info", "nanite.session.open", {
+        platform_host: target.hostname,
+        mode: input.mode,
+        nanite_id: machine.naniteId || null
+      });
       ws.send(JSON.stringify(machine.buildHello(new Date().toISOString())));
     });
     ws.on("message", (data) => {
@@ -170,10 +180,26 @@ async function connectOnce(input: {
       if (directive.op === "store_bearer") {
         input.state.saveBearer(directive.secret);
         delete input.env.TF_NANITE_ENROLLMENT_TOKEN;
+        if (directive.reason === "renew") {
+          logEvent("info", "nanite.credential.renewed", { nanite_id: machine.naniteId, tenant_id: machine.tenantId });
+        }
+        return;
+      }
+      if (directive.op === "set_role") {
+        logEvent("info", "nanite.session.role", {
+          nanite_id: machine.naniteId || null,
+          tenant_id: machine.tenantId || null,
+          role: directive.role
+        });
         return;
       }
       if (directive.op === "store_allowlist") {
         input.state.saveAllowlist(directive.generation, directive.entries);
+        logEvent("info", "nanite.allowlist", {
+          nanite_id: machine.naniteId,
+          generation: directive.generation,
+          entries: directive.entries.length
+        });
         return;
       }
       if (directive.op === "abort") {
