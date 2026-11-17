@@ -336,11 +336,15 @@ test("install does not replace an OpenRC service it did not create", () => {
 test("install enables the Docker daemon on OpenRC", () => {
   const dir = mkdtempSync(join(tmpdir(), "nanite-install-docker-openrc-"));
   const bin = join(dir, "bin");
+  const hostBin = join(dir, "host-bin");
   const initDir = join(dir, "init.d");
   mkdirSync(bin);
+  mkdirSync(hostBin);
   mkdirSync(initDir);
   writeExe(join(bin, "docker"), runtimeStub);
   writeExe(join(bin, "rc-update"), "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$NANITE_RC_UPDATE_LOG\"\nexit 0\n");
+  // Host podman is preferred when both exist. This stub must not be selected.
+  writeExe(join(hostBin, "podman"), "#!/bin/sh\necho host-podman >&2\nexit 125\n");
   writeExe(join(initDir, "docker"), "#!/sbin/openrc-run\n");
   const result = spawnSync(
     "sh",
@@ -348,7 +352,8 @@ test("install enables the Docker daemon on OpenRC", () => {
     {
       env: {
         ...process.env,
-        PATH: `${bin}:/usr/bin:/bin`,
+        PATH: `${bin}:${hostBin}:/usr/bin:/bin`,
+        TF_NANITE_RUNTIME: "docker",
         TF_NANITE_PLATFORM_URL: "wss://platform.example/api/v1/nanites/session",
         TF_NANITE_BOOT_MANAGER: "openrc",
         TF_NANITE_INIT_DIR: initDir,

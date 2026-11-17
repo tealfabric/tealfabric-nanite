@@ -165,6 +165,7 @@ export NANITE_IMAGE_REF='https://cdn.tealfabric.io/nanite/0.1.0/tealfabric-nanit
 export TF_NANITE_CHANNEL=0.1.0
 export TF_NANITE_STATE_DIR=/var/lib/tealfabric-nanite
 export TF_NANITE_CONTAINER_NAME=tealfabric-nanite
+export TF_NANITE_RUNTIME=docker   # podman | docker; default is podman when both are installed
 ```
 
 Or pass flags after `sh -s --`:

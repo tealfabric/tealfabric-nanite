@@ -14,6 +14,7 @@
 #   NANITE_IMAGE_REF / TF_NANITE_IMAGE / --image
 #     (default: latest semver from CDN latest/release.json)
 #   TF_NANITE_CHANNEL / --channel  (optional pin: 0.1.0 | nightly-build | …)
+#   TF_NANITE_RUNTIME       podman | docker (default: podman if on PATH, else docker)
 #   curl … | sh -s -- --image REGISTRY/tealfabric-nanite:TAG
 #   [--ca-file PEM] [--state-dir DIR] [--name NAME]
 #
@@ -253,22 +254,37 @@ EOF
 }
 
 runtime=""
-if command -v podman >/dev/null 2>&1; then
-  runtime=podman
-elif command -v docker >/dev/null 2>&1; then
-  runtime=docker
-elif [ -f /etc/alpine-release ]; then
-  install_alpine_podman
-  runtime=podman
-else
-  cat >&2 <<'EOF'
+case "${TF_NANITE_RUNTIME:-}" in
+  podman|docker)
+    if ! command -v "$TF_NANITE_RUNTIME" >/dev/null 2>&1; then
+      echo "TF_NANITE_RUNTIME=${TF_NANITE_RUNTIME} is not on PATH" >&2
+      exit 1
+    fi
+    runtime=$TF_NANITE_RUNTIME
+    ;;
+  "")
+    if command -v podman >/dev/null 2>&1; then
+      runtime=podman
+    elif command -v docker >/dev/null 2>&1; then
+      runtime=docker
+    elif [ -f /etc/alpine-release ]; then
+      install_alpine_podman
+      runtime=podman
+    else
+      cat >&2 <<'EOF'
 Docker or Podman is required.
 Debian or Ubuntu: sudo apt-get update && sudo apt-get install -y docker.io
 Fedora: sudo dnf install -y podman
 macOS: brew install --cask docker
 EOF
-  exit 1
-fi
+      exit 1
+    fi
+    ;;
+  *)
+    echo "unknown TF_NANITE_RUNTIME: ${TF_NANITE_RUNTIME} (expected podman or docker)" >&2
+    exit 1
+    ;;
+esac
 
 # Alpine may already have podman from a prior attempt without iptables.
 if [ -f /etc/alpine-release ] && [ "$runtime" = podman ] && ! command -v iptables >/dev/null 2>&1; then
