@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -207,4 +207,189 @@ test("install dry run accepts NANITE_IMAGE_REF from the Tealfabric snippet", () 
   assert.equal(result.status, 0, result.stderr.toString());
   assert.match(result.stdout.toString(), /podman pull registry\.example\/tealfabric-nanite:0\.1\.0/);
   assert.equal(existsSync(log), false);
+});
+
+function writeExe(path: string, body: string) {
+  writeFileSync(path, body);
+  chmodSync(path, 0o755);
+}
+
+const runtimeStub = `#!/bin/sh
+printf '%s\\n' "$*" >> "$NANITE_PODMAN_LOG"
+if [ "$1" = "run" ]; then
+  prev=
+  for arg in "$@"; do
+    if [ "$prev" = "-v" ]; then
+      case "$arg" in
+        *:/var/lib/tealfabric-nanite)
+          host=\${arg%%:*}
+          printf '%s\\n' nanite-test > "$host/nanite_id"
+          ;;
+      esac
+    fi
+    prev=$arg
+  done
+fi
+exit 0
+`;
+
+test("install enables an OpenRC service that starts the container on boot", () => {
+  const dir = mkdtempSync(join(tmpdir(), "nanite-install-openrc-"));
+  const bin = join(dir, "bin");
+  const initDir = join(dir, "init.d");
+  mkdirSync(bin);
+  writeExe(join(bin, "podman"), runtimeStub);
+  writeExe(join(bin, "rc-update"), "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$NANITE_RC_UPDATE_LOG\"\nexit 0\n");
+  writeExe(join(bin, "rc-service"), "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$NANITE_RC_SERVICE_LOG\"\nexit 0\n");
+  const result = spawnSync(
+    "sh",
+    [join(root, "install.sh"), "--image", "registry.example/tealfabric-nanite:1", "--state-dir", join(dir, "state")],
+    {
+      env: {
+        ...process.env,
+        PATH: `${bin}:/usr/bin:/bin`,
+        TF_NANITE_PLATFORM_URL: "wss://platform.example/api/v1/nanites/session",
+        TF_NANITE_BOOT_MANAGER: "openrc",
+        TF_NANITE_INIT_DIR: initDir,
+        NANITE_PODMAN_LOG: join(dir, "podman.log"),
+        NANITE_RC_UPDATE_LOG: join(dir, "rc-update.log"),
+        NANITE_RC_SERVICE_LOG: join(dir, "rc-service.log")
+      }
+    }
+  );
+  assert.equal(result.status, 0, result.stderr.toString());
+  const initFile = join(initDir, "tealfabric-nanite");
+  const script = readFileSync(initFile, "utf8");
+  assert.match(script, /tealfabric-nanite-install\.sh/);
+  assert.match(script, /name="\$RC_SVCNAME"/);
+  assert.match(script, /need net/);
+  assert.match(script, /\$running/);
+  assert.match(script, /start 'tealfabric-nanite'/);
+  assert.match(script, /stop -t 20 'tealfabric-nanite'/);
+  assert.equal(statSync(initFile).mode & 0o111, 0o111);
+  const syntax = spawnSync("sh", ["-n", initFile]);
+  assert.equal(syntax.status, 0, syntax.stderr.toString());
+  assert.match(readFileSync(join(dir, "rc-update.log"), "utf8"), /add tealfabric-nanite default/);
+  assert.match(readFileSync(join(dir, "rc-service.log"), "utf8"), /tealfabric-nanite start/);
+  assert.equal(readFileSync(join(dir, "state", "nanite_id"), "utf8").trim(), "nanite-test");
+});
+
+test("install dry run plans the OpenRC boot service and does not install it", () => {
+  const dir = mkdtempSync(join(tmpdir(), "nanite-install-openrc-dry-"));
+  const bin = join(dir, "bin");
+  const initDir = join(dir, "init.d");
+  mkdirSync(bin);
+  writeExe(join(bin, "podman"), "#!/bin/sh\nexit 0\n");
+  writeExe(join(bin, "rc-update"), "#!/bin/sh\nexit 0\n");
+  const result = spawnSync(
+    "sh",
+    [join(root, "install.sh"), "--image", "registry.example/tealfabric-nanite:1", "--state-dir", join(dir, "state")],
+    {
+      env: {
+        ...process.env,
+        PATH: `${bin}:/usr/bin:/bin`,
+        TF_NANITE_INSTALL_DRY_RUN: "1",
+        TF_NANITE_PLATFORM_URL: "wss://platform.example/api/v1/nanites/session",
+        TF_NANITE_BOOT_MANAGER: "openrc",
+        TF_NANITE_INIT_DIR: initDir
+      }
+    }
+  );
+  assert.equal(result.status, 0, result.stderr.toString());
+  assert.match(result.stdout.toString(), /rc-update add tealfabric-nanite default/);
+  assert.match(result.stdout.toString(), /rc-service tealfabric-nanite start/);
+  assert.equal(existsSync(join(initDir, "tealfabric-nanite")), false);
+});
+
+test("install does not replace an OpenRC service it did not create", () => {
+  const dir = mkdtempSync(join(tmpdir(), "nanite-install-openrc-foreign-"));
+  const bin = join(dir, "bin");
+  const initDir = join(dir, "init.d");
+  mkdirSync(bin);
+  mkdirSync(initDir);
+  writeExe(join(bin, "podman"), runtimeStub);
+  writeExe(join(bin, "rc-update"), "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$NANITE_RC_UPDATE_LOG\"\nexit 0\n");
+  writeExe(join(bin, "rc-service"), "#!/bin/sh\nexit 0\n");
+  const initFile = join(initDir, "tealfabric-nanite");
+  writeFileSync(initFile, "#!/sbin/openrc-run\n# appliance unit\n");
+  const result = spawnSync(
+    "sh",
+    [join(root, "install.sh"), "--image", "registry.example/tealfabric-nanite:1", "--state-dir", join(dir, "state")],
+    {
+      env: {
+        ...process.env,
+        PATH: `${bin}:/usr/bin:/bin`,
+        TF_NANITE_PLATFORM_URL: "wss://platform.example/api/v1/nanites/session",
+        TF_NANITE_BOOT_MANAGER: "openrc",
+        TF_NANITE_INIT_DIR: initDir,
+        NANITE_PODMAN_LOG: join(dir, "podman.log"),
+        NANITE_RC_UPDATE_LOG: join(dir, "rc-update.log")
+      }
+    }
+  );
+  assert.equal(result.status, 0, result.stderr.toString());
+  assert.equal(readFileSync(initFile, "utf8"), "#!/sbin/openrc-run\n# appliance unit\n");
+  assert.equal(existsSync(join(dir, "rc-update.log")), false);
+  assert.match(result.stderr.toString(), /leaving it in place/);
+});
+
+test("install enables the Docker daemon on OpenRC", () => {
+  const dir = mkdtempSync(join(tmpdir(), "nanite-install-docker-openrc-"));
+  const bin = join(dir, "bin");
+  const initDir = join(dir, "init.d");
+  mkdirSync(bin);
+  mkdirSync(initDir);
+  writeExe(join(bin, "docker"), runtimeStub);
+  writeExe(join(bin, "rc-update"), "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$NANITE_RC_UPDATE_LOG\"\nexit 0\n");
+  writeExe(join(initDir, "docker"), "#!/sbin/openrc-run\n");
+  const result = spawnSync(
+    "sh",
+    [join(root, "install.sh"), "--image", "registry.example/tealfabric-nanite:1", "--state-dir", join(dir, "state")],
+    {
+      env: {
+        ...process.env,
+        PATH: `${bin}:/usr/bin:/bin`,
+        TF_NANITE_PLATFORM_URL: "wss://platform.example/api/v1/nanites/session",
+        TF_NANITE_BOOT_MANAGER: "openrc",
+        TF_NANITE_INIT_DIR: initDir,
+        NANITE_PODMAN_LOG: join(dir, "podman.log"),
+        NANITE_RC_UPDATE_LOG: join(dir, "rc-update.log")
+      }
+    }
+  );
+  assert.equal(result.status, 0, result.stderr.toString());
+  assert.equal(existsSync(join(initDir, "tealfabric-nanite")), false);
+  assert.match(readFileSync(join(dir, "rc-update.log"), "utf8"), /add docker default/);
+});
+
+test("install enables a systemd unit that starts the Podman container on boot", () => {
+  const dir = mkdtempSync(join(tmpdir(), "nanite-install-systemd-"));
+  const bin = join(dir, "bin");
+  const unitDir = join(dir, "systemd");
+  mkdirSync(bin);
+  writeExe(join(bin, "podman"), runtimeStub);
+  writeExe(join(bin, "systemctl"), "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$NANITE_SYSTEMCTL_LOG\"\nexit 0\n");
+  const result = spawnSync(
+    "sh",
+    [join(root, "install.sh"), "--image", "registry.example/tealfabric-nanite:1", "--state-dir", join(dir, "state")],
+    {
+      env: {
+        ...process.env,
+        PATH: `${bin}:/usr/bin:/bin`,
+        TF_NANITE_PLATFORM_URL: "wss://platform.example/api/v1/nanites/session",
+        TF_NANITE_BOOT_MANAGER: "systemd",
+        TF_NANITE_SYSTEMD_DIR: unitDir,
+        NANITE_PODMAN_LOG: join(dir, "podman.log"),
+        NANITE_SYSTEMCTL_LOG: join(dir, "systemctl.log")
+      }
+    }
+  );
+  assert.equal(result.status, 0, result.stderr.toString());
+  const unit = readFileSync(join(unitDir, "tealfabric-nanite.service"), "utf8");
+  assert.match(unit, /tealfabric-nanite-install\.sh/);
+  assert.match(unit, /WantedBy=multi-user\.target/);
+  assert.match(unit, /\$running/);
+  assert.match(unit, /start tealfabric-nanite/);
+  assert.match(readFileSync(join(dir, "systemctl.log"), "utf8"), /daemon-reload/);
+  assert.match(readFileSync(join(dir, "systemctl.log"), "utf8"), /enable --now tealfabric-nanite\.service/);
 });

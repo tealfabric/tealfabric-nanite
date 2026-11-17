@@ -148,9 +148,10 @@ What the script does, in order:
 3. For an `https://` image URL: downloads the `.tar.gz` archive, verifies `SHA256SUMS` when present, gunzips it, reads `image_tag` from sibling `release.json`, and `podman`/`docker load`s the image. For a non-URL reference: `pull`.
 4. Creates `/var/lib/tealfabric-nanite` mode `0700`.
 5. Starts the container with `--restart=always`, mounts the state directory, and passes the platform URL and enrollment token for the first run.
-6. Waits for `nanite_id` in the state directory and prints it.
+6. Enables boot start. Podman does not start containers on reboot: the script installs an OpenRC service (or a systemd unit) named after the container and adds it to the default runlevel. Docker keeps `--restart=always` and the script enables the Docker daemon so that policy runs after reboot.
+7. Waits for `nanite_id` in the state directory and prints it.
 
-After enrollment, the bearer secret is on disk. The enrollment token is not required again. Restart policy keeps the process reconnecting after a reboot.
+After enrollment, the bearer secret is on disk. The enrollment token is not required again. The boot service starts the container after a host reboot. `--restart=always` restarts the process if it exits while the host is up.
 
 The CDN must serve this repository's `install.sh` at `https://cdn.tealfabric.io/nanite/install.sh` (published by `tealfabric-nanite-ci` / `deploy-nanite.yml`). An older CDN copy that only accepts `--image` prints `NANITE_IMAGE_REF is unset` and ignores the env var — republish after merging, or pipe a local checkout: `sh ./install.sh`.
 

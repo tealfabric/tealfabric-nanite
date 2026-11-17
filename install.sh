@@ -16,6 +16,11 @@
 #   TF_NANITE_CHANNEL / --channel  (optional pin: 0.1.0 | nightly-build | …)
 #   curl … | sh -s -- --image REGISTRY/tealfabric-nanite:TAG
 #   [--ca-file PEM] [--state-dir DIR] [--name NAME]
+#
+# --restart=always only applies while the engine is already running. Podman does
+# not start containers on boot. After the container is created, this script enables
+# a boot service: OpenRC or systemd for Podman, or the Docker daemon so its
+# restart policy runs after reboot.
 set -eu
 
 CDN_BASE=${TF_NANITE_CDN_BASE:-https://cdn.tealfabric.io/nanite}
@@ -371,6 +376,220 @@ load_archive() {
   rm -rf "$tmp"
 }
 
+# Locate a tool even when root's PATH omits /sbin (curl | sh, su without -).
+tool_path() {
+  _tool=$1
+  _found=$(command -v "$_tool" 2>/dev/null || true)
+  if [ -n "$_found" ]; then
+    printf '%s\n' "$_found"
+    return 0
+  fi
+  for _dir in /sbin /usr/sbin /bin /usr/bin; do
+    if [ -x "$_dir/$_tool" ]; then
+      printf '%s\n' "$_dir/$_tool"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# openrc, systemd, or empty. OpenRC wins when it is the running init; a rc-update
+# or systemctl on PATH still counts so a minimal Alpine PATH is enough.
+boot_manager() {
+  case "${TF_NANITE_BOOT_MANAGER:-}" in
+    openrc|systemd)
+      printf '%s\n' "$TF_NANITE_BOOT_MANAGER"
+      return 0
+      ;;
+    "") ;;
+    *)
+      echo "unknown TF_NANITE_BOOT_MANAGER: ${TF_NANITE_BOOT_MANAGER}" >&2
+      exit 1
+      ;;
+  esac
+  if [ -d /run/openrc ] || [ -x /sbin/openrc ] || [ -x /usr/sbin/openrc ]; then
+    if tool_path rc-update >/dev/null 2>&1; then
+      printf '%s\n' openrc
+      return 0
+    fi
+  fi
+  if [ -d /run/systemd/system ]; then
+    if tool_path systemctl >/dev/null 2>&1; then
+      printf '%s\n' systemd
+      return 0
+    fi
+  fi
+  if tool_path rc-update >/dev/null 2>&1; then
+    printf '%s\n' openrc
+    return 0
+  fi
+  if tool_path systemctl >/dev/null 2>&1; then
+    printf '%s\n' systemd
+    return 0
+  fi
+  return 1
+}
+
+require_service_name() {
+  case "$CONTAINER_NAME" in
+    ""|-*|*[!A-Za-z0-9_.-]*)
+      echo "container name cannot be a boot service (use letters, digits, '.', '_', '-'): ${CONTAINER_NAME}" >&2
+      exit 1
+      ;;
+  esac
+}
+
+enable_docker_openrc() {
+  if [ "${TF_NANITE_INSTALL_DRY_RUN:-}" = "1" ]; then
+    printf '%s\n' "rc-update add docker default"
+    return 0
+  fi
+  _init_dir=${TF_NANITE_INIT_DIR:-/etc/init.d}
+  if [ ! -x "${_init_dir}/docker" ] && [ ! -x /etc/init.d/docker ]; then
+    echo "Docker has no OpenRC service at /etc/init.d/docker. Enable the Docker daemon at boot so --restart=always starts Nanite after reboot." >&2
+    exit 1
+  fi
+  _rc_update=$(tool_path rc-update)
+  "$_rc_update" add docker default
+  echo "Enabled OpenRC service docker so Nanite starts on boot"
+}
+
+enable_container_openrc() {
+  _init_dir=${TF_NANITE_INIT_DIR:-/etc/init.d}
+  _init_file="${_init_dir}/${CONTAINER_NAME}"
+  _runtime_bin=$(tool_path "$runtime")
+  if [ "${TF_NANITE_INSTALL_DRY_RUN:-}" = "1" ]; then
+    printf '%s\n' "install ${_init_file}"
+    printf '%s\n' "rc-update add ${CONTAINER_NAME} default"
+    printf '%s\n' "rc-service ${CONTAINER_NAME} start"
+    return 0
+  fi
+  if [ -e "$_init_file" ] && ! grep -q 'tealfabric-nanite-install.sh' "$_init_file"; then
+    echo "OpenRC service ${CONTAINER_NAME} already exists and was not created by install.sh; leaving it in place" >&2
+    return 0
+  fi
+  mkdir -p "$_init_dir"
+  # Alpine's /etc/init.d/podman starts the API and then filters restart-policy=always
+  # AND unless-stopped, which matches no container. Start this container by name.
+  cat > "$_init_file" <<EOF
+#!/sbin/openrc-run
+# tealfabric-nanite-install.sh — start the ${CONTAINER_NAME} container on boot.
+
+name="\$RC_SVCNAME"
+description="Tealfabric Nanite container"
+
+depend() {
+  need net
+  after firewall
+  use cgroups
+}
+
+start() {
+  ebegin "Starting \$RC_SVCNAME"
+  running=\$("${_runtime_bin}" inspect -f '{{.State.Running}}' '${CONTAINER_NAME}' 2>/dev/null || true)
+  case "\$running" in
+    true) eend 0 ;;
+    *) "${_runtime_bin}" start '${CONTAINER_NAME}'; eend \$? ;;
+  esac
+}
+
+stop() {
+  ebegin "Stopping \$RC_SVCNAME"
+  if ! "${_runtime_bin}" stop -t 20 '${CONTAINER_NAME}'; then
+    running=\$("${_runtime_bin}" inspect -f '{{.State.Running}}' '${CONTAINER_NAME}' 2>/dev/null || true)
+    if [ "\$running" = "true" ]; then
+      eend 1
+      return 1
+    fi
+  fi
+  eend 0
+}
+EOF
+  chmod 755 "$_init_file"
+  _rc_update=$(tool_path rc-update)
+  _rc_service=$(tool_path rc-service)
+  if [ -x /etc/init.d/cgroups ]; then
+    "$_rc_update" add cgroups default 2>/dev/null || "$_rc_update" add cgroups boot 2>/dev/null || true
+  fi
+  "$_rc_update" add "$CONTAINER_NAME" default
+  # Container is already running from this install. Mark the service started so
+  # shutdown stops it (SIGTERM, goodbye) and the next boot starts it.
+  "$_rc_service" "$CONTAINER_NAME" start
+  echo "Enabled OpenRC service ${CONTAINER_NAME} (starts on boot)"
+}
+
+enable_docker_systemd() {
+  if [ "${TF_NANITE_INSTALL_DRY_RUN:-}" = "1" ]; then
+    printf '%s\n' "systemctl enable docker.service"
+    return 0
+  fi
+  _systemctl=$(tool_path systemctl)
+  "$_systemctl" enable docker.service
+  echo "Enabled systemd service docker so Nanite starts on boot"
+}
+
+enable_container_systemd() {
+  _unit_dir=${TF_NANITE_SYSTEMD_DIR:-/etc/systemd/system}
+  _unit_file="${_unit_dir}/${CONTAINER_NAME}.service"
+  _runtime_bin=$(tool_path "$runtime")
+  if [ "${TF_NANITE_INSTALL_DRY_RUN:-}" = "1" ]; then
+    printf '%s\n' "install ${_unit_file}"
+    printf '%s\n' "systemctl enable --now ${CONTAINER_NAME}.service"
+    return 0
+  fi
+  if [ -e "$_unit_file" ] && ! grep -q 'tealfabric-nanite-install.sh' "$_unit_file"; then
+    echo "systemd unit ${CONTAINER_NAME}.service already exists and was not created by install.sh; leaving it in place" >&2
+    return 0
+  fi
+  mkdir -p "$_unit_dir"
+  cat > "$_unit_file" <<EOF
+# tealfabric-nanite-install.sh — start the ${CONTAINER_NAME} container on boot.
+[Unit]
+Description=Tealfabric Nanite
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStartSec=180
+TimeoutStopSec=40
+ExecStart=/bin/sh -c 'running=\$(${_runtime_bin} inspect -f "{{.State.Running}}" ${CONTAINER_NAME} 2>/dev/null || true); [ "\$running" = true ] || ${_runtime_bin} start ${CONTAINER_NAME}'
+ExecStop=/bin/sh -c '${_runtime_bin} stop -t 20 ${CONTAINER_NAME}; running=\$(${_runtime_bin} inspect -f "{{.State.Running}}" ${CONTAINER_NAME} 2>/dev/null || true); [ "\$running" != true ]'
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  _systemctl=$(tool_path systemctl)
+  "$_systemctl" daemon-reload
+  "$_systemctl" enable --now "${CONTAINER_NAME}.service"
+  echo "Enabled systemd service ${CONTAINER_NAME} (starts on boot)"
+}
+
+enable_boot_autostart() {
+  require_service_name
+  _manager=$(boot_manager || true)
+  case "$_manager" in
+    openrc)
+      if [ "$runtime" = docker ]; then
+        enable_docker_openrc
+      else
+        enable_container_openrc
+      fi
+      ;;
+    systemd)
+      if [ "$runtime" = docker ]; then
+        enable_docker_systemd
+      else
+        enable_container_systemd
+      fi
+      ;;
+    *)
+      echo "No OpenRC or systemd found. ${runtime} --restart=always restarts the process only while ${runtime} is running. Enable ${runtime} at boot so Nanite starts after a reboot." >&2
+      ;;
+  esac
+}
+
 if [ "${TF_NANITE_INSTALL_DRY_RUN:-}" = "1" ]; then
   if [ "$is_http" -eq 1 ]; then
     printf '%s\n' "download $IMAGE && gunzip && $runtime load && $runtime $args \${image_tag}"
@@ -378,6 +597,7 @@ if [ "${TF_NANITE_INSTALL_DRY_RUN:-}" = "1" ]; then
     printf '%s\n' "$runtime pull $IMAGE"
     printf '%s\n' "$runtime $args $IMAGE"
   fi
+  enable_boot_autostart
   exit 0
 fi
 
@@ -398,6 +618,8 @@ else
   # shellcheck disable=SC2086
   "$runtime" $args "$IMAGE"
 fi
+
+enable_boot_autostart
 
 i=0
 while [ "$i" -lt 90 ]; do
